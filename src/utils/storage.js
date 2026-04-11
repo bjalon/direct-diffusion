@@ -28,6 +28,16 @@ function buildEnvDefault() {
     return { layout: resolvedLayout, slots: {}, streams: [] };
   }
 
+  // Extract the original iframe dimensions from the FB plugin URL params.
+  let originalWidth = 560;
+  let originalHeight = 315;
+  try {
+    const url = new URL(src);
+    const w = parseInt(url.searchParams.get('width')  || '0', 10);
+    const h = parseInt(url.searchParams.get('height') || '0', 10);
+    if (w > 0 && h > 0) { originalWidth = w; originalHeight = h; }
+  } catch { /* keep defaults */ }
+
   const id = 'env-default';
   const slots = {};
   for (let i = 0; i < layoutConfig.slots; i++) {
@@ -37,7 +47,7 @@ function buildEnvDefault() {
   return {
     layout: resolvedLayout,
     slots,
-    streams: [{ id, label, src, videoUrl, orientation }],
+    streams: [{ id, label, src, videoUrl, orientation, originalWidth, originalHeight }],
   };
 }
 

@@ -1,21 +1,34 @@
 import { useRef, useState, useEffect } from 'react';
-import { buildFbSrc } from '../utils/iframeParser';
 
-const ASPECT = {
-  landscape: 16 / 9,
-  portrait:  9 / 16,
-};
+/**
+ * Compute CSS transform to scale the iframe (at its original dimensions) within the cell.
+ *
+ * landscape → "cover" horizontally: fill cell width, clip height if needed (like object-fit: cover)
+ * portrait  → "contain": show the full video, centered, with black bars if needed (like object-fit: contain)
+ */
+function computeTransform(cellW, cellH, origW, origH, orientation) {
+  let scale;
 
-function fitInCell(cellW, cellH, orientation) {
-  const ratio = ASPECT[orientation] ?? 16 / 9;
-  let w = cellW;
-  let h = w / ratio;
-  if (h > cellH) {
-    h = cellH;
-    w = h * ratio;
+  if (orientation === 'landscape') {
+    // Fill the cell width. If the scaled height overflows, it gets clipped by overflow:hidden.
+    scale = cellW / origW;
+  } else {
+    // Fit the entire video in the cell (no cropping).
+    scale = Math.min(cellH / origH, cellW / origW);
   }
-  return { width: Math.round(w), height: Math.round(h) };
+
+  const scaledW = origW * scale;
+  const scaledH = origH * scale;
+
+  // Center the scaled iframe in the cell.
+  const offsetX = (cellW - scaledW) / 2;
+  const offsetY = (cellH - scaledH) / 2;
+
+  return { scale, offsetX, offsetY };
 }
+
+// Fallback dimensions if not stored on the stream object.
+const FALLBACK = { landscape: [560, 315], portrait: [267, 476] };
 
 export default function VideoCell({ stream, slotIndex }) {
   const containerRef = useRef(null);
@@ -40,32 +53,61 @@ export default function VideoCell({ stream, slotIndex }) {
     return () => observer.disconnect();
   }, []);
 
-  const orientation = stream?.orientation ?? 'landscape';
-  const dims = size ? fitInCell(size.width, size.height, orientation) : null;
-  const iframeSrc = stream && dims ? buildFbSrc(stream.src, dims.width, dims.height) : null;
-
-  return (
-    <div ref={containerRef} className="video-cell">
-      {iframeSrc ? (
-        <iframe
-          key={`${stream.id}-${orientation}-${dims.width}x${dims.height}`}
-          src={iframeSrc}
-          width={dims.width}
-          height={dims.height}
-          className="video-iframe"
-          scrolling="no"
-          frameBorder="0"
-          allowFullScreen
-          allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
-        />
-      ) : (
+  const renderContent = () => {
+    if (!stream) {
+      return (
         <div className="video-empty">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <polygon points="5 3 19 12 5 21 5 3" />
           </svg>
-          <span>{stream ? 'Chargement...' : `Emplacement ${slotIndex + 1}`}</span>
+          <span>{`Emplacement ${slotIndex + 1}`}</span>
         </div>
-      )}
+      );
+    }
+
+    if (!size) {
+      return (
+        <div className="video-empty">
+          <span>Chargement...</span>
+        </div>
+      );
+    }
+
+    const orientation = stream.orientation ?? 'landscape';
+    const [fbW, fbH] = FALLBACK[orientation];
+    const origW = stream.originalWidth  ?? fbW;
+    const origH = stream.originalHeight ?? fbH;
+
+    const { scale, offsetX, offsetY } = computeTransform(
+      size.width, size.height, origW, origH, orientation
+    );
+
+    return (
+      <iframe
+        key={`${stream.id}-${orientation}-${origW}x${origH}`}
+        src={stream.src}
+        width={origW}
+        height={origH}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          border: 'none',
+          display: 'block',
+          transformOrigin: '0 0',
+          transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
+        }}
+        scrolling="no"
+        frameBorder="0"
+        allowFullScreen
+        allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+      />
+    );
+  };
+
+  return (
+    <div ref={containerRef} className="video-cell">
+      {renderContent()}
     </div>
   );
 }

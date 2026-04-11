@@ -80,7 +80,15 @@ export default function ConfigPage({ config, onUpdate }) {
       ...prev,
       streams: [
         ...prev.streams,
-        { id, label, src: parsed.src, videoUrl: parsed.videoUrl, orientation },
+        {
+          id,
+          label,
+          src: parsed.src,
+          videoUrl: parsed.videoUrl,
+          orientation,
+          originalWidth: parsed.originalWidth,
+          originalHeight: parsed.originalHeight,
+        },
       ],
     }));
     setIframeInput('');
