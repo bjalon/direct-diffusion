@@ -19,7 +19,10 @@ function buildEnvDefault() {
   const src        = import.meta.env.VITE_DEFAULT_STREAM_SRC   || '';
   const videoUrl   = import.meta.env.VITE_DEFAULT_STREAM_URL   || '';
   const label      = import.meta.env.VITE_DEFAULT_STREAM_LABEL || 'Flux principal';
-  const orientation = import.meta.env.VITE_DEFAULT_STREAM_ORIENTATION || 'landscape';
+  // landscape-ccw = rotate -90°, landscape-cw = rotate +90°, portrait = no rotation
+  const rawOrientation = import.meta.env.VITE_DEFAULT_STREAM_ORIENTATION || 'portrait';
+  // Normalise legacy 'landscape' value
+  const orientation = rawOrientation === 'landscape' ? 'landscape-ccw' : rawOrientation;
 
   const layoutConfig = LAYOUTS[layout] ?? LAYOUTS['1'];
   const resolvedLayout = LAYOUTS[layout] ? layout : '1';

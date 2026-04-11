@@ -3,29 +3,59 @@ import { LAYOUTS, generateId } from '../utils/storage';
 import { parseIframe } from '../utils/iframeParser';
 import LayoutPicker from '../components/LayoutPicker';
 
+// Normalise the legacy 'landscape' value so existing configs still work.
+function normaliseOrientation(v) {
+  return v === 'landscape' ? 'landscape-ccw' : (v ?? 'portrait');
+}
+
+const ORIENT_OPTIONS = [
+  {
+    value: 'portrait',
+    label: 'Portrait',
+    title: 'Vidéo filmée en portrait (téléphone droit)',
+    icon: (
+      <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor">
+        <rect x="1" y="1" width="10" height="14" rx="2" />
+      </svg>
+    ),
+  },
+  {
+    value: 'landscape-ccw',
+    label: 'Paysage ↺',
+    title: 'Rotation −90° : téléphone couché, côté gauche en bas',
+    icon: (
+      <svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor">
+        <rect x="1" y="1" width="14" height="10" rx="2" />
+      </svg>
+    ),
+  },
+  {
+    value: 'landscape-cw',
+    label: 'Paysage ↻',
+    title: 'Rotation +90° : téléphone couché, côté droit en bas',
+    icon: (
+      <svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor">
+        <rect x="1" y="1" width="14" height="10" rx="2" />
+      </svg>
+    ),
+  },
+];
+
 function OrientationToggle({ value, onChange }) {
+  const norm = normaliseOrientation(value);
   return (
     <div className="orientation-toggle">
-      <button
-        className={`orient-btn${value === 'landscape' ? ' active' : ''}`}
-        onClick={() => onChange('landscape')}
-        title="Paysage (16:9)"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-          <rect x="2" y="5" width="20" height="14" rx="2" />
-        </svg>
-        Paysage
-      </button>
-      <button
-        className={`orient-btn${value === 'portrait' ? ' active' : ''}`}
-        onClick={() => onChange('portrait')}
-        title="Portrait (9:16)"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-          <rect x="7" y="2" width="10" height="20" rx="2" />
-        </svg>
-        Portrait
-      </button>
+      {ORIENT_OPTIONS.map((opt) => (
+        <button
+          key={opt.value}
+          className={`orient-btn${norm === opt.value ? ' active' : ''}`}
+          onClick={() => onChange(opt.value)}
+          title={opt.title}
+        >
+          {opt.icon}
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }

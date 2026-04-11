@@ -1,44 +1,45 @@
 import { useRef, useState, useEffect } from 'react';
 
 /**
- * Compute CSS transform to scale the iframe (at its original dimensions) within the cell.
+ * Compute iframe position and CSS transform.
  *
- * landscape → "cover" horizontally: fill cell width, clip height if needed (like object-fit: cover)
- * portrait  → "contain": show the full video, centered, with black bars if needed (like object-fit: contain)
+ * portrait        → no rotation, video contained in the cell (black bars on sides)
+ * landscape-ccw   → rotate -90° (phone held left side down), scale to fill cell
+ * landscape-cw    → rotate +90° (phone held right side down), scale to fill cell
+ *
+ * The rotation only applies when the iframe is taller than wide (portrait-encoded).
+ * If the iframe is already landscape-shaped, just scale it to fit.
  */
 function computeTransform(cellW, cellH, origW, origH, orientation) {
-  let scale;
+  // Normalise legacy 'landscape' value
+  const norm = orientation === 'landscape' ? 'landscape-ccw' : (orientation ?? 'portrait');
 
-  if (orientation === 'landscape') {
-    // Fill the cell width. If the scaled height overflows, it gets clipped by overflow:hidden.
-    scale = cellW / origW;
-  } else {
-    // Fit the entire video in the cell (no cropping).
-    scale = Math.min(cellH / origH, cellW / origW);
+  const needsRotation =
+    (norm === 'landscape-ccw' || norm === 'landscape-cw') && origH > origW;
+
+  if (needsRotation) {
+    // After 90° rotation the visual box is origH wide × origW tall.
+    const scale = Math.min(cellW / origH, cellH / origW);
+    const deg   = norm === 'landscape-cw' ? 90 : -90;
+    // Center the unrotated iframe so that its center coincides with the cell center.
+    const left = (cellW - origW) / 2;
+    const top  = (cellH - origH) / 2;
+    return { left, top, transform: `rotate(${deg}deg) scale(${scale})` };
   }
 
-  const scaledW = origW * scale;
-  const scaledH = origH * scale;
-
-  // Center the scaled iframe in the cell.
-  const offsetX = (cellW - scaledW) / 2;
-  const offsetY = (cellH - scaledH) / 2;
-
-  return { scale, offsetX, offsetY };
+  // No rotation: contain the video in the cell.
+  const scale = Math.min(cellH / origH, cellW / origW);
+  const left  = (cellW - origW) / 2;
+  const top   = (cellH - origH) / 2;
+  return { left, top, transform: `scale(${scale})` };
 }
-
-// Fallback dimensions if not stored on the stream object.
-const FALLBACK = { landscape: [560, 315], portrait: [267, 476] };
 
 export default function VideoCell({ stream, slotIndex }) {
   const containerRef = useRef(null);
   const [size, setSize] = useState(null);
 
-  // Measure the cell once after mount (layout is stable by then).
-  // The parent keys this component on layout+slot, so it remounts on layout change.
   useEffect(() => {
     if (!containerRef.current) return;
-
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
@@ -48,7 +49,6 @@ export default function VideoCell({ stream, slotIndex }) {
         observer.disconnect();
       }
     });
-
     observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, []);
@@ -64,21 +64,15 @@ export default function VideoCell({ stream, slotIndex }) {
         </div>
       );
     }
-
     if (!size) {
-      return (
-        <div className="video-empty">
-          <span>Chargement...</span>
-        </div>
-      );
+      return <div className="video-empty"><span>Chargement…</span></div>;
     }
 
-    const orientation = stream.orientation ?? 'landscape';
-    const [fbW, fbH] = FALLBACK[orientation];
-    const origW = stream.originalWidth  ?? fbW;
-    const origH = stream.originalHeight ?? fbH;
+    const orientation = stream.orientation ?? 'portrait';
+    const origW = stream.originalWidth  ?? 267;
+    const origH = stream.originalHeight ?? 476;
 
-    const { scale, offsetX, offsetY } = computeTransform(
+    const { left, top, transform } = computeTransform(
       size.width, size.height, origW, origH, orientation
     );
 
@@ -90,12 +84,12 @@ export default function VideoCell({ stream, slotIndex }) {
         height={origH}
         style={{
           position: 'absolute',
-          top: 0,
-          left: 0,
+          left: `${left}px`,
+          top: `${top}px`,
           border: 'none',
           display: 'block',
-          transformOrigin: '0 0',
-          transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
+          transformOrigin: 'center center',
+          transform,
         }}
         scrolling="no"
         frameBorder="0"
