@@ -1,0 +1,26 @@
+[
+  {
+    "id": "départ",
+    "label": "Départ",
+    "url": "https://www.facebook.com/100009254535272/videos/1577503566683316/",
+    "rotation": -90
+  },
+  {
+    "id": "milieu1",
+    "label": "Milieu1",
+    "url": "https://www.facebook.com/100009254535272/videos/1577503566683316/",
+    "rotation": -90
+  },
+  {
+    "id": "milieu2",
+    "label": "Milieu2",
+    "url": "https://www.facebook.com/100009254535272/videos/1577503566683316/",
+    "rotation": -90
+  },
+  {
+    "id": "arrivée",
+    "label": "Arrivée",
+    "url": "https://www.facebook.com/100009254535272/videos/1577503566683316/",
+    "rotation": -90
+  }
+]

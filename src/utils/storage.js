@@ -9,49 +9,11 @@ export const LAYOUTS = {
 
 const STORAGE_KEY = 'direct-diffusion-config';
 
-/**
- * Build the factory-default config from environment variables (set in .env).
- * If VITE_DEFAULT_STREAM_SRC is defined, the stream is created and assigned
- * to every slot of the default layout.
- */
+/** Default config: layout from .env, no streams (streams come from streams.json). */
 function buildEnvDefault() {
-  const layout     = import.meta.env.VITE_DEFAULT_LAYOUT       || '1';
-  const src        = import.meta.env.VITE_DEFAULT_STREAM_SRC   || '';
-  const videoUrl   = import.meta.env.VITE_DEFAULT_STREAM_URL   || '';
-  const label      = import.meta.env.VITE_DEFAULT_STREAM_LABEL || 'Flux principal';
-  // landscape-ccw = rotate -90°, landscape-cw = rotate +90°, portrait = no rotation
-  const rawOrientation = import.meta.env.VITE_DEFAULT_STREAM_ORIENTATION || 'portrait';
-  // Normalise legacy 'landscape' value
-  const orientation = rawOrientation === 'landscape' ? 'landscape-ccw' : rawOrientation;
-
-  const layoutConfig = LAYOUTS[layout] ?? LAYOUTS['1'];
+  const layout = import.meta.env.VITE_DEFAULT_LAYOUT || '1';
   const resolvedLayout = LAYOUTS[layout] ? layout : '1';
-
-  if (!src) {
-    return { layout: resolvedLayout, slots: {}, streams: [] };
-  }
-
-  // Extract the original iframe dimensions from the FB plugin URL params.
-  let originalWidth = 560;
-  let originalHeight = 315;
-  try {
-    const url = new URL(src);
-    const w = parseInt(url.searchParams.get('width')  || '0', 10);
-    const h = parseInt(url.searchParams.get('height') || '0', 10);
-    if (w > 0 && h > 0) { originalWidth = w; originalHeight = h; }
-  } catch { /* keep defaults */ }
-
-  const id = 'env-default';
-  const slots = {};
-  for (let i = 0; i < layoutConfig.slots; i++) {
-    slots[i] = id;
-  }
-
-  return {
-    layout: resolvedLayout,
-    slots,
-    streams: [{ id, label, src, videoUrl, orientation, originalWidth, originalHeight }],
-  };
+  return { layout: resolvedLayout, slots: {}, streams: [] };
 }
 
 export function loadConfig() {
@@ -59,7 +21,6 @@ export function loadConfig() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return buildEnvDefault();
     const saved = JSON.parse(raw);
-    // Merge with a minimal fallback so old saved configs stay valid
     return { layout: '1', slots: {}, streams: [], ...saved };
   } catch {
     return buildEnvDefault();
@@ -68,6 +29,11 @@ export function loadConfig() {
 
 export function saveConfig(config) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+}
+
+/** True if a config has already been saved in this browser. */
+export function hasSavedConfig() {
+  return !!localStorage.getItem(STORAGE_KEY);
 }
 
 export function generateId() {

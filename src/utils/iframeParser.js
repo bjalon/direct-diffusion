@@ -33,16 +33,17 @@ export function parseIframe(htmlCode) {
 }
 
 /**
- * Rebuild a Facebook plugin video URL with new width/height dimensions.
+ * Build a Facebook plugin embed src from a plain Facebook video page URL.
+ * e.g. https://www.facebook.com/123/videos/456/
+ *   → https://www.facebook.com/plugins/video.php?href=...&show_text=false&width=W&height=H
  */
-export function buildFbSrc(originalSrc, width, height) {
-  try {
-    const url = new URL(originalSrc);
-    url.searchParams.set('width', Math.round(width));
-    url.searchParams.set('height', Math.round(height));
-    url.searchParams.set('show_text', 'false');
-    return url.toString();
-  } catch {
-    return originalSrc;
-  }
+export function buildSrcFromUrl(videoUrl, width = 267, height = 476) {
+  const params = new URLSearchParams({
+    href: videoUrl,
+    show_text: 'false',
+    width: String(width),
+    height: String(height),
+    t: '0',
+  });
+  return `https://www.facebook.com/plugins/video.php?${params.toString()}`;
 }

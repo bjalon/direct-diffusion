@@ -1,37 +1,44 @@
 import { useRef, useState, useEffect } from 'react';
 
 /**
- * Compute iframe position and CSS transform.
- *
- * portrait        → no rotation, video contained in the cell (black bars on sides)
- * landscape-ccw   → rotate -90° (phone held left side down), scale to fill cell
- * landscape-cw    → rotate +90° (phone held right side down), scale to fill cell
- *
- * The rotation only applies when the iframe is taller than wide (portrait-encoded).
- * If the iframe is already landscape-shaped, just scale it to fit.
+ * Resolve rotation degrees from a stream object.
+ * Handles both the new `rotation` number field and the legacy `orientation` string.
  */
-function computeTransform(cellW, cellH, origW, origH, orientation) {
-  // Normalise legacy 'landscape' value
-  const norm = orientation === 'landscape' ? 'landscape-ccw' : (orientation ?? 'portrait');
+function getRotation(stream) {
+  if (typeof stream.rotation === 'number') return stream.rotation;
+  // Legacy orientation values
+  const legacy = { 'landscape-ccw': -90, 'landscape-cw': 90, 'landscape': -90, 'portrait': 0 };
+  return legacy[stream.orientation] ?? 0;
+}
 
-  const needsRotation =
-    (norm === 'landscape-ccw' || norm === 'landscape-cw') && origH > origW;
+/**
+ * Compute position + CSS transform so the iframe is rotated and scaled to fill the cell.
+ *
+ * The iframe is placed with its center at the cell center.
+ * transform-origin: center center ensures rotation/scale happen around that point.
+ *
+ * For ±90° rotations the iframe's axes swap (origH becomes the visual width),
+ * so we adjust the scale formula accordingly.
+ */
+function computeTransform(cellW, cellH, origW, origH, rotation) {
+  const isAxisSwapped = Math.abs(rotation) === 90;
 
-  if (needsRotation) {
-    // After 90° rotation the visual box is origH wide × origW tall.
-    const scale = Math.min(cellW / origH, cellH / origW);
-    const deg   = norm === 'landscape-cw' ? 90 : -90;
-    // Center the unrotated iframe so that its center coincides with the cell center.
-    const left = (cellW - origW) / 2;
-    const top  = (cellH - origH) / 2;
-    return { left, top, transform: `rotate(${deg}deg) scale(${scale})` };
-  }
+  // Visual dimensions after rotation.
+  const visualW = isAxisSwapped ? origH : origW;
+  const visualH = isAxisSwapped ? origW : origH;
 
-  // No rotation: contain the video in the cell.
-  const scale = Math.min(cellH / origH, cellW / origW);
-  const left  = (cellW - origW) / 2;
-  const top   = (cellH - origH) / 2;
-  return { left, top, transform: `scale(${scale})` };
+  // Contain: fit the rotated content fully inside the cell.
+  const scale = Math.min(cellW / visualW, cellH / visualH);
+
+  // Center the (unrotated) iframe so its center == cell center.
+  const left = (cellW - origW) / 2;
+  const top  = (cellH - origH) / 2;
+
+  const transform = rotation === 0
+    ? `scale(${scale})`
+    : `rotate(${rotation}deg) scale(${scale})`;
+
+  return { left, top, transform };
 }
 
 export default function VideoCell({ stream, slotIndex }) {
@@ -57,7 +64,8 @@ export default function VideoCell({ stream, slotIndex }) {
     if (!stream) {
       return (
         <div className="video-empty">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" strokeWidth="1.5">
             <polygon points="5 3 19 12 5 21 5 3" />
           </svg>
           <span>{`Emplacement ${slotIndex + 1}`}</span>
@@ -68,17 +76,17 @@ export default function VideoCell({ stream, slotIndex }) {
       return <div className="video-empty"><span>Chargement…</span></div>;
     }
 
-    const orientation = stream.orientation ?? 'portrait';
+    const rotation = getRotation(stream);
     const origW = stream.originalWidth  ?? 267;
     const origH = stream.originalHeight ?? 476;
 
     const { left, top, transform } = computeTransform(
-      size.width, size.height, origW, origH, orientation
+      size.width, size.height, origW, origH, rotation
     );
 
     return (
       <iframe
-        key={`${stream.id}-${orientation}-${origW}x${origH}`}
+        key={`${stream.id}-${rotation}-${origW}x${origH}`}
         src={stream.src}
         width={origW}
         height={origH}

@@ -3,56 +3,32 @@ import { LAYOUTS, generateId } from '../utils/storage';
 import { parseIframe } from '../utils/iframeParser';
 import LayoutPicker from '../components/LayoutPicker';
 
-// Normalise the legacy 'landscape' value so existing configs still work.
-function normaliseOrientation(v) {
-  return v === 'landscape' ? 'landscape-ccw' : (v ?? 'portrait');
-}
+// ── Rotation picker ────────────────────────────────────────────────────────
 
-const ORIENT_OPTIONS = [
-  {
-    value: 'portrait',
-    label: 'Portrait',
-    title: 'Vidéo filmée en portrait (téléphone droit)',
-    icon: (
-      <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor">
-        <rect x="1" y="1" width="10" height="14" rx="2" />
-      </svg>
-    ),
-  },
-  {
-    value: 'landscape-ccw',
-    label: 'Paysage ↺',
-    title: 'Rotation −90° : téléphone couché, côté gauche en bas',
-    icon: (
-      <svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor">
-        <rect x="1" y="1" width="14" height="10" rx="2" />
-      </svg>
-    ),
-  },
-  {
-    value: 'landscape-cw',
-    label: 'Paysage ↻',
-    title: 'Rotation +90° : téléphone couché, côté droit en bas',
-    icon: (
-      <svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor">
-        <rect x="1" y="1" width="14" height="10" rx="2" />
-      </svg>
-    ),
-  },
+const ROTATION_OPTIONS = [
+  { value: 0,   label: '0°',    title: 'Pas de rotation' },
+  { value: 90,  label: '+90°',  title: 'Rotation +90° (sens horaire)' },
+  { value: -90, label: '−90°',  title: 'Rotation −90° (sens antihoraire)' },
+  { value: 180, label: '180°',  title: 'Retournement' },
 ];
 
-function OrientationToggle({ value, onChange }) {
-  const norm = normaliseOrientation(value);
+/** Read the effective rotation of a stream (supports legacy orientation field). */
+function streamRotation(stream) {
+  if (typeof stream.rotation === 'number') return stream.rotation;
+  const legacy = { 'landscape-ccw': -90, 'landscape-cw': 90, 'landscape': -90, 'portrait': 0 };
+  return legacy[stream.orientation] ?? 0;
+}
+
+function RotationPicker({ value, onChange }) {
   return (
     <div className="orientation-toggle">
-      {ORIENT_OPTIONS.map((opt) => (
+      {ROTATION_OPTIONS.map((opt) => (
         <button
           key={opt.value}
-          className={`orient-btn${norm === opt.value ? ' active' : ''}`}
+          className={`orient-btn${value === opt.value ? ' active' : ''}`}
           onClick={() => onChange(opt.value)}
           title={opt.title}
         >
-          {opt.icon}
           {opt.label}
         </button>
       ))}
@@ -60,11 +36,13 @@ function OrientationToggle({ value, onChange }) {
   );
 }
 
+// ── Config page ────────────────────────────────────────────────────────────
+
 export default function ConfigPage({ config, onUpdate }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [iframeInput, setIframeInput] = useState('');
   const [streamLabel, setStreamLabel] = useState('');
-  const [orientation, setOrientation] = useState('landscape');
+  const [rotation, setRotation] = useState(0);
   const [parseError, setParseError] = useState('');
 
   const layout = LAYOUTS[config.layout] ?? LAYOUTS['1'];
@@ -83,14 +61,15 @@ export default function ConfigPage({ config, onUpdate }) {
     }));
   };
 
-  // --- Iframe paste: auto-detect orientation ---
+  // --- Iframe paste: auto-detect rotation from dimensions ---
   const handleIframeChange = (e) => {
     const value = e.target.value;
     setIframeInput(value);
     setParseError('');
     if (value.trim()) {
       const parsed = parseIframe(value);
-      if (parsed) setOrientation(parsed.orientation);
+      // Suggest -90° when the iframe is portrait (phone likely held sideways).
+      if (parsed) setRotation(parsed.originalHeight > parsed.originalWidth ? -90 : 0);
     }
   };
 
@@ -115,7 +94,7 @@ export default function ConfigPage({ config, onUpdate }) {
           label,
           src: parsed.src,
           videoUrl: parsed.videoUrl,
-          orientation,
+          rotation,
           originalWidth: parsed.originalWidth,
           originalHeight: parsed.originalHeight,
         },
@@ -123,7 +102,7 @@ export default function ConfigPage({ config, onUpdate }) {
     }));
     setIframeInput('');
     setStreamLabel('');
-    setOrientation('landscape');
+    setRotation(0);
     setShowAddForm(false);
   };
 
@@ -146,12 +125,12 @@ export default function ConfigPage({ config, onUpdate }) {
     }));
   };
 
-  // --- Change stream orientation ---
-  const handleOrientationChange = (streamId, newOrientation) => {
+  // --- Change rotation ---
+  const handleRotationChange = (streamId, newRotation) => {
     onUpdate((prev) => ({
       ...prev,
       streams: prev.streams.map((s) =>
-        s.id === streamId ? { ...s, orientation: newOrientation } : s
+        s.id === streamId ? { ...s, rotation: newRotation } : s
       ),
     }));
   };
@@ -188,9 +167,7 @@ export default function ConfigPage({ config, onUpdate }) {
                   >
                     <option value="">— Aucun —</option>
                     {config.streams.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.label}
-                      </option>
+                      <option key={s.id} value={s.id}>{s.label}</option>
                     ))}
                   </select>
                   {assignedStream && (
@@ -228,9 +205,9 @@ export default function ConfigPage({ config, onUpdate }) {
                   {stream.videoUrl}
                 </div>
               </div>
-              <OrientationToggle
-                value={stream.orientation ?? 'landscape'}
-                onChange={(o) => handleOrientationChange(stream.id, o)}
+              <RotationPicker
+                value={streamRotation(stream)}
+                onChange={(r) => handleRotationChange(stream.id, r)}
               />
               <button
                 className="btn btn-danger btn-sm"
@@ -266,8 +243,8 @@ export default function ConfigPage({ config, onUpdate }) {
               spellCheck={false}
             />
 
-            <label className="form-label">Orientation</label>
-            <OrientationToggle value={orientation} onChange={setOrientation} />
+            <label className="form-label">Rotation</label>
+            <RotationPicker value={rotation} onChange={setRotation} />
 
             {parseError && <div className="form-error">{parseError}</div>}
 
@@ -281,7 +258,7 @@ export default function ConfigPage({ config, onUpdate }) {
                   setShowAddForm(false);
                   setIframeInput('');
                   setStreamLabel('');
-                  setOrientation('landscape');
+                  setRotation(0);
                   setParseError('');
                 }}
               >
