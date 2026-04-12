@@ -36,6 +36,35 @@ function RotationPicker({ value, onChange }) {
   );
 }
 
+// ── Delay picker (for courses-terminees) ──────────────────────────────────
+
+const DELAY_OPTIONS = [5, 10, 15, 30, 60];
+
+function DelayPicker({ value, onChange }) {
+  return (
+    <div className="orientation-toggle">
+      {DELAY_OPTIONS.map((s) => (
+        <button
+          key={s}
+          className={`orient-btn${value === s ? ' active' : ''}`}
+          onClick={() => onChange(s)}
+          title={`${s} secondes`}
+        >
+          {s}s
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Virtual stream definitions ─────────────────────────────────────────────
+
+const VIRTUAL_TYPES = [
+  { type: 'classement',        label: 'Classement général',  icon: '🏆' },
+  { type: 'derniere-course',   label: 'Dernière course',     icon: '🏁' },
+  { type: 'courses-terminees', label: 'Courses terminées',   icon: '🔄' },
+];
+
 // ── Config page ────────────────────────────────────────────────────────────
 
 export default function ConfigPage({ config, onUpdate }) {
@@ -106,6 +135,18 @@ export default function ConfigPage({ config, onUpdate }) {
     setShowAddForm(false);
   };
 
+  // --- Add virtual stream ---
+  const handleAddVirtual = (vtype) => {
+    const id = generateId();
+    onUpdate((prev) => ({
+      ...prev,
+      streams: [
+        ...prev.streams,
+        { id, type: vtype.type, label: vtype.label, rotation: 0, delay: 10 },
+      ],
+    }));
+  };
+
   // --- Remove stream ---
   const handleRemoveStream = (streamId) => {
     onUpdate((prev) => ({
@@ -122,6 +163,16 @@ export default function ConfigPage({ config, onUpdate }) {
     onUpdate((prev) => ({
       ...prev,
       streams: prev.streams.map((s) => (s.id === streamId ? { ...s, label: newLabel } : s)),
+    }));
+  };
+
+  // --- Change delay (virtual streams) ---
+  const handleDelayChange = (streamId, newDelay) => {
+    onUpdate((prev) => ({
+      ...prev,
+      streams: prev.streams.map((s) =>
+        s.id === streamId ? { ...s, delay: newDelay } : s
+      ),
     }));
   };
 
@@ -180,6 +231,25 @@ export default function ConfigPage({ config, onUpdate }) {
         )}
       </section>
 
+      {/* ── Affichages virtuels ── */}
+      <section className="config-section">
+        <h2 className="section-title">Affichages virtuels</h2>
+        <p className="hint" style={{ marginBottom: 12 }}>
+          Ces flux affichent les classements et résultats en temps réel.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {VIRTUAL_TYPES.map((vt) => (
+            <button
+              key={vt.type}
+              className="btn btn-secondary"
+              onClick={() => handleAddVirtual(vt)}
+            >
+              {vt.icon} {vt.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
       {/* ── Bibliothèque de flux ── */}
       <section className="config-section">
         <h2 className="section-title">Flux vidéo</h2>
@@ -188,35 +258,49 @@ export default function ConfigPage({ config, onUpdate }) {
           {config.streams.length === 0 && (
             <div className="stream-empty">Aucun flux ajouté pour l'instant.</div>
           )}
-          {config.streams.map((stream) => (
-            <div key={stream.id} className="stream-item">
-              <div className="stream-thumb">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M21.582 6.186a2.506 2.506 0 0 0-1.765-1.77C18.254 4 12 4 12 4s-6.254 0-7.817.416a2.506 2.506 0 0 0-1.765 1.77C2 7.757 2 12 2 12s0 4.243.418 5.814a2.506 2.506 0 0 0 1.765 1.77C5.746 20 12 20 12 20s6.254 0 7.817-.416a2.506 2.506 0 0 0 1.765-1.77C22 16.243 22 12 22 12s0-4.243-.418-5.814zM10 15.464V8.536L16 12l-6 3.464z"/>
-                </svg>
-              </div>
-              <div className="stream-info">
-                <input
-                  className="stream-label-input"
-                  value={stream.label}
-                  onChange={(e) => handleRenameStream(stream.id, e.target.value)}
-                />
-                <div className="stream-url" title={stream.videoUrl}>
-                  {stream.videoUrl}
+          {config.streams.map((stream) => {
+            const vtype = VIRTUAL_TYPES.find((v) => v.type === stream.type);
+            return (
+              <div key={stream.id} className="stream-item">
+                <div className="stream-thumb" title={vtype ? vtype.label : 'Flux Facebook'}>
+                  {vtype ? (
+                    <span style={{ fontSize: 20 }}>{vtype.icon}</span>
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M21.582 6.186a2.506 2.506 0 0 0-1.765-1.77C18.254 4 12 4 12 4s-6.254 0-7.817.416a2.506 2.506 0 0 0-1.765 1.77C2 7.757 2 12 2 12s0 4.243.418 5.814a2.506 2.506 0 0 0 1.765 1.77C5.746 20 12 20 12 20s6.254 0 7.817-.416a2.506 2.506 0 0 0 1.765-1.77C22 16.243 22 12 22 12s0-4.243-.418-5.814zM10 15.464V8.536L16 12l-6 3.464z"/>
+                    </svg>
+                  )}
                 </div>
+                <div className="stream-info">
+                  <input
+                    className="stream-label-input"
+                    value={stream.label}
+                    onChange={(e) => handleRenameStream(stream.id, e.target.value)}
+                  />
+                  <div className="stream-url" title={stream.videoUrl ?? stream.type}>
+                    {vtype ? vtype.label : stream.videoUrl}
+                  </div>
+                </div>
+                {vtype?.type === 'courses-terminees' ? (
+                  <DelayPicker
+                    value={stream.delay ?? 10}
+                    onChange={(d) => handleDelayChange(stream.id, d)}
+                  />
+                ) : !vtype ? (
+                  <RotationPicker
+                    value={streamRotation(stream)}
+                    onChange={(r) => handleRotationChange(stream.id, r)}
+                  />
+                ) : null}
+                <button
+                  className="btn btn-danger btn-sm"
+                  onClick={() => handleRemoveStream(stream.id)}
+                >
+                  Supprimer
+                </button>
               </div>
-              <RotationPicker
-                value={streamRotation(stream)}
-                onChange={(r) => handleRotationChange(stream.id, r)}
-              />
-              <button
-                className="btn btn-danger btn-sm"
-                onClick={() => handleRemoveStream(stream.id)}
-              >
-                Supprimer
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {!showAddForm ? (

@@ -1,4 +1,13 @@
 import { useRef, useState, useEffect } from 'react';
+import ClassementDisplay       from './displays/ClassementDisplay';
+import RaceResultsDisplay      from './displays/RaceResultsDisplay';
+import CoursesTermineesDisplay from './displays/CoursesTermineesDisplay';
+
+const VIRTUAL_COMPONENTS = {
+  'classement':          (s) => <ClassementDisplay />,
+  'derniere-course':     (s) => <RaceResultsDisplay />,
+  'courses-terminees':   (s) => <CoursesTermineesDisplay delay={s.delay ?? 10} />,
+};
 
 /**
  * Resolve rotation degrees from a stream object.
@@ -72,6 +81,17 @@ export default function VideoCell({ stream, slotIndex }) {
         </div>
       );
     }
+
+    // Virtual display (not an iframe)
+    const VirtualComponent = stream.type ? VIRTUAL_COMPONENTS[stream.type] : null;
+    if (VirtualComponent) {
+      return (
+        <div style={{ position: 'absolute', inset: 0 }}>
+          {VirtualComponent(stream)}
+        </div>
+      );
+    }
+
     if (!size) {
       return <div className="video-empty"><span>Chargement…</span></div>;
     }

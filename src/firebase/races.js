@@ -1,5 +1,6 @@
 import {
-  collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, serverTimestamp,
+  collection, onSnapshot, addDoc, deleteDoc, updateDoc,
+  doc, query, orderBy, serverTimestamp, getDocs,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -15,8 +16,17 @@ export function subscribeRaces(onData) {
 export const addRace = (number) =>
   addDoc(collection(db, 'races'), { number, createdAt: serverTimestamp() });
 
-export const deleteRace = (raceId) =>
-  deleteDoc(doc(db, 'races', raceId));
+export const deleteRace   = (raceId) => deleteDoc(doc(db, 'races', raceId));
+export const finishRace   = (raceId) => updateDoc(doc(db, 'races', raceId), { finished: true });
+export const reopenRace   = (raceId) => updateDoc(doc(db, 'races', raceId), { finished: false });
+
+/** Fetch all results for a race (one-shot read). */
+export async function fetchResults(raceId) {
+  const snap = await getDocs(
+    query(collection(db, 'races', raceId, 'results'), orderBy('addedAt', 'asc')),
+  );
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
 
 // ── Results (sub-collection of a race) ───────────────────────────────────────
 

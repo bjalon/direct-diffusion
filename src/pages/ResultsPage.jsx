@@ -1,22 +1,7 @@
 import { useState, useEffect } from 'react';
 import { subscribeParticipants } from '../firebase/participants';
-import { subscribeRaces, addRace, subscribeResults, addResult, deleteResult } from '../firebase/races';
-
-/**
- * Parse a time string to seconds for comparison.
- * Accepts: "83.45"  →  83.45
- *          "1:23.45" → 83.45
- *          "1:23:45" → 5025
- */
-function parseTime(str) {
-  if (!str) return Infinity;
-  const parts = str.trim().split(':');
-  const nums = parts.map(Number);
-  if (nums.some(isNaN)) return Infinity;
-  if (nums.length === 1) return nums[0];
-  if (nums.length === 2) return nums[0] * 60 + nums[1];
-  return nums[0] * 3600 + nums[1] * 60 + nums[2];
-}
+import { subscribeRaces, addRace, subscribeResults, addResult, deleteResult, finishRace, reopenRace } from '../firebase/races';
+import { parseTime } from '../utils/time';
 
 export default function ResultsPage() {
   const [participants, setParticipants] = useState([]);
@@ -115,8 +100,17 @@ export default function ResultsPage() {
 
           {/* Left: participant list */}
           <div className="results-panel">
-            <div className="panel-title">
-              Participants — Course&nbsp;<strong>{selectedRace?.number}</strong>
+            <div className="panel-title panel-title--row">
+              <span>Participants — Course&nbsp;<strong>{selectedRace?.number}</strong></span>
+              {selectedRace?.finished ? (
+                <button className="btn btn-secondary btn-sm" onClick={() => reopenRace(selectedRaceId)}>
+                  Réouvrir
+                </button>
+              ) : (
+                <button className="btn btn-finish btn-sm" onClick={() => finishRace(selectedRaceId)}>
+                  ✓ Terminer
+                </button>
+              )}
             </div>
             {participants.length === 0 && (
               <div className="stream-empty">Aucun participant configuré.</div>
