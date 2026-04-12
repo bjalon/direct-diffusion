@@ -9,11 +9,11 @@ export const LAYOUTS = {
 
 const STORAGE_KEY = 'direct-diffusion-config';
 
-/** Default config: layout from .env, no streams (streams come from streams.json). */
+/** Default layout+slots from .env. Streams come from Firestore, not here. */
 function buildEnvDefault() {
   const layout = import.meta.env.VITE_DEFAULT_LAYOUT || '1';
   const resolvedLayout = LAYOUTS[layout] ? layout : '1';
-  return { layout: resolvedLayout, slots: {}, streams: [] };
+  return { layout: resolvedLayout, slots: {} };
 }
 
 export function loadConfig() {
@@ -21,19 +21,15 @@ export function loadConfig() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return buildEnvDefault();
     const saved = JSON.parse(raw);
-    return { layout: '1', slots: {}, streams: [], ...saved };
+    return { layout: '1', slots: {}, ...saved };
   } catch {
     return buildEnvDefault();
   }
 }
 
-export function saveConfig(config) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-}
-
-/** True if a config has already been saved in this browser. */
-export function hasSavedConfig() {
-  return !!localStorage.getItem(STORAGE_KEY);
+/** Save only layout and slots — streams are stored in Firestore, not localStorage. */
+export function saveConfig({ layout, slots }) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ layout, slots }));
 }
 
 export function generateId() {

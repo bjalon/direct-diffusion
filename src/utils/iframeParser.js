@@ -47,3 +47,21 @@ export function buildSrcFromUrl(videoUrl, width = 267, height = 476) {
   });
   return `https://www.facebook.com/plugins/video.php?${params.toString()}`;
 }
+
+/**
+ * Accept either a plain Facebook video URL or a full <iframe> embed code.
+ * Returns the same shape as parseIframe, or null if unrecognised.
+ */
+export function parseInput(input) {
+  const trimmed = input.trim();
+  if (/https?:\/\/(www\.)?facebook\.com\/.+\/videos\//.test(trimmed)) {
+    return {
+      src: buildSrcFromUrl(trimmed),
+      videoUrl: trimmed,
+      originalWidth: 267,
+      originalHeight: 476,
+      orientation: 'portrait',
+    };
+  }
+  return parseIframe(trimmed);
+}

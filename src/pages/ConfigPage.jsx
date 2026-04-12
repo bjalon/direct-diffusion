@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { LAYOUTS, generateId } from '../utils/storage';
-import { parseIframe } from '../utils/iframeParser';
+import { parseInput } from '../utils/iframeParser';
 import LayoutPicker from '../components/LayoutPicker';
 
 // ── Rotation picker ────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ export default function ConfigPage({ config, onUpdate }) {
     setIframeInput(value);
     setParseError('');
     if (value.trim()) {
-      const parsed = parseIframe(value);
+      const parsed = parseInput(value);
       // Suggest -90° when the iframe is portrait (phone likely held sideways).
       if (parsed) setRotation(parsed.originalHeight > parsed.originalWidth ? -90 : 0);
     }
@@ -76,10 +76,10 @@ export default function ConfigPage({ config, onUpdate }) {
   // --- Add stream ---
   const handleAddStream = () => {
     setParseError('');
-    const parsed = parseIframe(iframeInput);
+    const parsed = parseInput(iframeInput);
     if (!parsed) {
       setParseError(
-        'Code iframe invalide. Assurez-vous de coller le code complet <iframe ...> de Facebook.'
+        'Format invalide. Collez un lien Facebook (https://www.facebook.com/.../videos/...) ou un code <iframe ...>.'
       );
       return;
     }
@@ -233,10 +233,10 @@ export default function ConfigPage({ config, onUpdate }) {
               onChange={(e) => setStreamLabel(e.target.value)}
             />
 
-            <label className="form-label">Code iframe Facebook</label>
+            <label className="form-label">Lien ou code iframe Facebook</label>
             <textarea
               className="form-textarea"
-              placeholder={'Collez ici le code <iframe ...> copié depuis Facebook\n(bouton Partager → Intégrer)'}
+              placeholder={'Lien Facebook :\nhttps://www.facebook.com/xxx/videos/yyy/\n\nou code iframe complet :\n<iframe src="https://www.facebook.com/plugins/video.php?..." ...>'}
               value={iframeInput}
               onChange={handleIframeChange}
               rows={6}

@@ -1,145 +1,161 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
-import { loadConfig, saveConfig, hasSavedConfig } from './utils/storage';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth } from './firebase';
+import { subscribeStreams, saveStreams, seedStreamsIfEmpty, isAuthorized } from './firebase/streams';
+import { loadConfig, saveConfig } from './utils/storage';
 import { buildSrcFromUrl } from './utils/iframeParser';
 import NavBar from './components/NavBar';
 import DisplayPage from './pages/DisplayPage';
 import ConfigPage from './pages/ConfigPage';
-import StartupDialog from './components/StartupDialog';
+import LoginPage from './pages/LoginPage';
 
-/** Map legacy orientation string → rotation degrees. */
+// ── Stream normalisation (used to seed Firestore from streams.json) ───────────
+
 function orientationToRotation(orientation) {
   const map = { 'landscape-ccw': -90, 'landscape-cw': 90, 'landscape': -90, 'portrait': 0 };
   return map[orientation] ?? 0;
 }
 
-/**
- * Normalise a raw entry from streams.json into a full stream object.
- *
- * Accepted JSON fields:
- *   id                          – stable identifier (required)
- *   url                         – Facebook video page URL (required unless src provided)
- *   label                       – display name (optional, defaults to url)
- *   rotation                    – degrees: 0 | 90 | -90 | 180  (preferred)
- *   orientation                 – legacy string, converted to rotation if rotation absent
- *   originalWidth/originalHeight – iframe dimensions (optional, default 267×476)
- *   src                         – pre-built plugin URL (overrides url)
- *
- * Returns null if the entry cannot be normalised.
- */
 function normaliseStream(raw) {
   if (!raw || !raw.id) return null;
-
   const origW = raw.originalWidth  ?? 267;
   const origH = raw.originalHeight ?? 476;
-
-  // Resolve rotation: prefer numeric `rotation`, fall back to legacy `orientation`.
   const rotation = typeof raw.rotation === 'number'
     ? raw.rotation
     : orientationToRotation(raw.orientation);
-
   const base = { id: raw.id, rotation, originalWidth: origW, originalHeight: origH };
 
   if (raw.src) {
-    return {
-      ...base,
-      label:    raw.label ?? raw.videoUrl ?? raw.src,
-      src:      raw.src,
-      videoUrl: raw.videoUrl ?? raw.src,
-    };
+    return { ...base, label: raw.label ?? raw.src, src: raw.src, videoUrl: raw.videoUrl ?? raw.src };
   }
-
   if (raw.url) {
-    return {
-      ...base,
-      label:    raw.label ?? raw.url,
-      src:      buildSrcFromUrl(raw.url, origW, origH),
-      videoUrl: raw.url,
-    };
+    return { ...base, label: raw.label ?? raw.url, src: buildSrcFromUrl(raw.url, origW, origH), videoUrl: raw.url };
   }
-
   return null;
 }
 
+// ── App ───────────────────────────────────────────────────────────────────────
+
 export default function App() {
-  const [config, setConfig] = useState(loadConfig);
+  // null = checking auth, false = not authenticated, object = authenticated user
+  const [user, setUser] = useState(null);
+  // null = checking, true = ok, false = denied
+  const [authorized, setAuthorized] = useState(null);
 
-  // null  → still loading streams.json
-  // []    → no default streams found (404 or empty file)
-  // [...] → default streams available
-  const [defaultStreams, setDefaultStreams] = useState(null);
-  const [showDialog, setShowDialog] = useState(false);
+  // Layout + slot assignments (persisted to localStorage)
+  const [layoutSlots, setLayoutSlots] = useState(loadConfig);
 
-  // Fetch streams.json once at startup.
+  // Streams from Firestore
+  const [streams, setStreams] = useState([]);
+
+  // ── Auth state ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    const hadSavedConfig = hasSavedConfig();
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u ?? false);
+      if (!u) setAuthorized(null);
+    });
+    return unsub;
+  }, []);
 
+  // ── Authorization check ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    isAuthorized(user.email)
+      .then(setAuthorized)
+      .catch(() => setAuthorized(false));
+  }, [user]);
+
+  // ── Firestore subscription + seed (only when authorized) ──────────────────
+  useEffect(() => {
+    if (!user || authorized !== true) {
+      setStreams([]);
+      return;
+    }
+
+    // Real-time listener
+    const unsub = subscribeStreams(setStreams);
+
+    // Seed from public/streams.json if Firestore is empty
     fetch('./streams.json')
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
+      .then((r) => (r.ok ? r.json() : []))
       .then((raw) => {
         if (!Array.isArray(raw) || raw.length === 0) return;
-
-        const streams = raw.map(normaliseStream).filter(Boolean);
-        if (streams.length === 0) return;
-
-        setDefaultStreams(streams);
-
-        if (hadSavedConfig) {
-          // A previous config exists → ask the user.
-          setShowDialog(true);
-        } else {
-          // First visit: silently use JSON streams, keep layout from env default.
-          setConfig((prev) => {
-            const next = { ...prev, streams };
-            saveConfig(next);
-            return next;
-          });
-        }
+        const normalised = raw.map(normaliseStream).filter(Boolean);
+        if (normalised.length > 0) seedStreamsIfEmpty(normalised).catch(() => {});
       })
-      .catch(() => {
-        // streams.json missing or invalid → silently ignore.
-        setDefaultStreams([]);
-      });
-  }, []);
+      .catch(() => {});
 
-  const updateConfig = useCallback((updater) => {
-    setConfig((prev) => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      saveConfig(next);
-      return next;
-    });
-  }, []);
+    return unsub;
+  }, [user, authorized]);
 
-  /** User chose to keep the previous (localStorage) config. */
-  const handleKeep = () => setShowDialog(false);
+  // ── Config updater ──────────────────────────────────────────────────────────
+  // Accepts the same (updater | nextConfig) signature as before.
+  // Streams → Firestore ; layout+slots → localStorage.
+  const updateConfig = (updater) => {
+    const prevFull = { ...layoutSlots, streams };
+    const next = typeof updater === 'function' ? updater(prevFull) : updater;
+    const { streams: nextStreams, ...nextLayoutSlots } = next;
 
-  /**
-   * User chose the default (JSON) streams.
-   * Replace streams but preserve layout and slot assignments.
-   */
-  const handleUseDefault = () => {
-    setConfig((prev) => {
-      const next = { ...prev, streams: defaultStreams };
-      saveConfig(next);
-      return next;
-    });
-    setShowDialog(false);
+    // Persist layout+slots
+    setLayoutSlots(nextLayoutSlots);
+    saveConfig(nextLayoutSlots);
+
+    // Persist streams if changed
+    if (nextStreams !== streams) {
+      saveStreams(nextStreams);
+    }
   };
+
+  const handleLogout = () => signOut(auth);
+
+  // ── Loading ─────────────────────────────────────────────────────────────────
+  if (user === null || (user && authorized === null)) {
+    return (
+      <div className="app-loading">
+        <div className="login-spinner" />
+      </div>
+    );
+  }
+
+  // ── Not authenticated ───────────────────────────────────────────────────────
+  if (user === false) {
+    return <LoginPage />;
+  }
+
+  // ── Not authorized ──────────────────────────────────────────────────────────
+  if (authorized === false) {
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <div className="login-icon" style={{ color: 'var(--danger)' }}>
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" strokeWidth="1.5">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          </div>
+          <h1 className="login-title">Accès refusé</h1>
+          <p className="login-subtitle">
+            L'adresse <strong className="login-email">{user.email}</strong> n'est pas
+            autorisée à accéder à cette application.
+          </p>
+          <button className="btn btn-secondary login-btn" onClick={handleLogout}>
+            Se déconnecter
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Authenticated ───────────────────────────────────────────────────────────
+  const config = { ...layoutSlots, streams };
 
   return (
     <HashRouter>
-      {showDialog && defaultStreams && (
-        <StartupDialog
-          defaultStreams={defaultStreams}
-          onKeep={handleKeep}
-          onUseDefault={handleUseDefault}
-        />
-      )}
       <div className="app-root">
-        <NavBar />
+        <NavBar user={user} onLogout={handleLogout} />
         <main className="app-main">
           <Routes>
             <Route path="/" element={<DisplayPage config={config} />} />
