@@ -8,6 +8,8 @@ import { buildSrcFromUrl } from './utils/iframeParser';
 import NavBar from './components/NavBar';
 import DisplayPage from './pages/DisplayPage';
 import ConfigPage from './pages/ConfigPage';
+import ParticipantsPage from './pages/ParticipantsPage';
+import ResultsPage from './pages/ResultsPage';
 import LoginPage from './pages/LoginPage';
 
 // ── Stream normalisation (used to seed Firestore from streams.json) ───────────
@@ -159,10 +161,9 @@ export default function App() {
         <main className="app-main">
           <Routes>
             <Route path="/" element={<DisplayPage config={config} />} />
-            <Route
-              path="/config"
-              element={<ConfigPage config={config} onUpdate={updateConfig} />}
-            />
+            <Route path="/config" element={<ConfigPage config={config} onUpdate={updateConfig} />} />
+            <Route path="/participants" element={<ParticipantsPage />} />
+            <Route path="/results" element={<ResultsPage />} />
           </Routes>
         </main>
       </div>
