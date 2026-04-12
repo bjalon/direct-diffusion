@@ -1,10 +1,15 @@
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
-/** Returns true if the given email is in the allowedUsers collection. */
-export async function isAuthorized(email) {
+/**
+ * Returns the user's roles document if they are in allowedUsers, or null.
+ * The document fields: { admin_flux?: true, results?: true }
+ * Mere existence = basic access.
+ */
+export async function getUserRoles(email) {
   const snap = await getDoc(doc(db, 'allowedUsers', email));
-  return snap.exists();
+  if (!snap.exists()) return null;
+  return snap.data();
 }
 
 const STREAMS_REF = doc(db, 'config', 'streams');

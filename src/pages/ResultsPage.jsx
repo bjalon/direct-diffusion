@@ -3,7 +3,7 @@ import { subscribeParticipants } from '../firebase/participants';
 import { subscribeRaces, addRace, subscribeResults, addResult, deleteResult, finishRace, reopenRace } from '../firebase/races';
 import { parseTime } from '../utils/time';
 
-export default function ResultsPage() {
+export default function ResultsPage({ canEdit = false }) {
   const [participants, setParticipants] = useState([]);
   const [races, setRaces]               = useState([]);
   const [selectedRaceId, setSelectedRaceId] = useState(null);
@@ -80,18 +80,20 @@ export default function ResultsPage() {
           ))}
         </select>
 
-        <div className="new-race-row">
-          <input
-            className="form-input new-race-input"
-            placeholder="Numéro"
-            value={raceInput}
-            onChange={(e) => setRaceInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleNewRace(); }}
-          />
-          <button className="btn btn-primary" onClick={handleNewRace}>
-            + Nouvelle course
-          </button>
-        </div>
+        {canEdit && (
+          <div className="new-race-row">
+            <input
+              className="form-input new-race-input"
+              placeholder="Numéro"
+              value={raceInput}
+              onChange={(e) => setRaceInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleNewRace(); }}
+            />
+            <button className="btn btn-primary" onClick={handleNewRace}>
+              + Nouvelle course
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── Main layout ── */}
@@ -102,7 +104,7 @@ export default function ResultsPage() {
           <div className="results-panel">
             <div className="panel-title panel-title--row">
               <span>Participants — Course&nbsp;<strong>{selectedRace?.number}</strong></span>
-              {selectedRace?.finished ? (
+              {canEdit && (selectedRace?.finished ? (
                 <button className="btn btn-secondary btn-sm" onClick={() => reopenRace(selectedRaceId)}>
                   Réouvrir
                 </button>
@@ -110,7 +112,7 @@ export default function ResultsPage() {
                 <button className="btn btn-finish btn-sm" onClick={() => finishRace(selectedRaceId)}>
                   ✓ Terminer
                 </button>
-              )}
+              ))}
             </div>
             {participants.length === 0 && (
               <div className="stream-empty">Aucun participant configuré.</div>
@@ -124,13 +126,15 @@ export default function ResultsPage() {
                 >
                   <span className="rp-label">{p.label}</span>
                   {count > 0 && <span className="rp-badge">{count}</span>}
-                  <button
-                    className="btn-plus"
-                    onClick={() => setDialogParticipant(p)}
-                    aria-label={`Ajouter un temps pour ${p.label}`}
-                  >
-                    +
-                  </button>
+                  {canEdit && (
+                    <button
+                      className="btn-plus"
+                      onClick={() => setDialogParticipant(p)}
+                      aria-label={`Ajouter un temps pour ${p.label}`}
+                    >
+                      +
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -141,7 +145,7 @@ export default function ResultsPage() {
             <div className="panel-title">Classement</div>
             {results.length === 0 ? (
               <div className="stream-empty">
-                Appuyez sur + pour enregistrer un temps.
+                {canEdit ? 'Appuyez sur + pour enregistrer un temps.' : 'Aucun résultat.'}
               </div>
             ) : (
               <table className="results-table">
@@ -150,7 +154,7 @@ export default function ResultsPage() {
                     <th className="rt-rank">#</th>
                     <th>Participant</th>
                     <th className="rt-time">Temps</th>
-                    <th></th>
+                    {canEdit && <th></th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -159,15 +163,17 @@ export default function ResultsPage() {
                       <td className="rt-rank">{rankById[r.id]}</td>
                       <td>{r.participantLabel}</td>
                       <td className="rt-time">{r.time}</td>
-                      <td>
-                        <button
-                          className="btn btn-danger btn-sm"
-                          onClick={() => deleteResult(selectedRaceId, r.id)}
-                          aria-label="Supprimer"
-                        >
-                          ✕
-                        </button>
-                      </td>
+                      {canEdit && (
+                        <td>
+                          <button
+                            className="btn btn-danger btn-sm"
+                            onClick={() => deleteResult(selectedRaceId, r.id)}
+                            aria-label="Supprimer"
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -182,7 +188,7 @@ export default function ResultsPage() {
       )}
 
       {/* Time entry dialog */}
-      {dialogParticipant && (
+      {canEdit && dialogParticipant && (
         <TimeEntryDialog
           participant={dialogParticipant}
           onConfirm={handleAddResult}

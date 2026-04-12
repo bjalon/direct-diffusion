@@ -3,7 +3,7 @@ import {
   subscribeParticipants, addParticipant, updateParticipant, deleteParticipant,
 } from '../firebase/participants';
 
-export default function ParticipantsPage() {
+export default function ParticipantsPage({ canEdit = false }) {
   const [participants, setParticipants] = useState([]);
   const [newLabel, setNewLabel] = useState('');
   const [adding, setAdding] = useState(false);
@@ -11,6 +11,7 @@ export default function ParticipantsPage() {
   useEffect(() => subscribeParticipants(setParticipants), []);
 
   const handleAdd = async () => {
+    if (!canEdit) return;
     const label = newLabel.trim();
     if (!label) return;
     const maxOrder = participants.reduce((m, p) => Math.max(m, p.order ?? 0), 0);
@@ -26,14 +27,14 @@ export default function ParticipantsPage() {
 
         <div className="participant-list">
           {participants.length === 0 && !adding && (
-            <div className="stream-empty">Aucun participant. Ajoutez-en un ci-dessous.</div>
+            <div className="stream-empty">Aucun participant{canEdit ? '. Ajoutez-en un ci-dessous.' : '.'}</div>
           )}
           {participants.map((p) => (
-            <ParticipantRow key={p.id} participant={p} />
+            <ParticipantRow key={p.id} participant={p} canEdit={canEdit} />
           ))}
         </div>
 
-        {adding ? (
+        {canEdit && (adding ? (
           <div className="add-stream-form">
             <label className="form-label">Nom du participant</label>
             <input
@@ -61,13 +62,13 @@ export default function ParticipantsPage() {
           <button className="btn btn-primary" onClick={() => setAdding(true)}>
             + Ajouter un participant
           </button>
-        )}
+        ))}
       </section>
     </div>
   );
 }
 
-function ParticipantRow({ participant }) {
+function ParticipantRow({ participant, canEdit }) {
   const [label, setLabel] = useState(participant.label);
   const [order, setOrder] = useState(participant.order ?? 0);
 
@@ -75,6 +76,7 @@ function ParticipantRow({ participant }) {
   useEffect(() => setOrder(participant.order ?? 0), [participant.order]);
 
   const saveLabel = () => {
+    if (!canEdit) return;
     const trimmed = label.trim();
     if (trimmed && trimmed !== participant.label) {
       updateParticipant(participant.id, { label: trimmed });
@@ -84,6 +86,7 @@ function ParticipantRow({ participant }) {
   };
 
   const saveOrder = () => {
+    if (!canEdit) return;
     const n = Number(order);
     if (!isNaN(n) && n !== participant.order) {
       updateParticipant(participant.id, { order: n });
@@ -96,24 +99,28 @@ function ParticipantRow({ participant }) {
         className="participant-order-input"
         type="number"
         value={order}
-        onChange={(e) => setOrder(e.target.value)}
+        onChange={(e) => canEdit && setOrder(e.target.value)}
         onBlur={saveOrder}
         min="1"
         title="Ordre de passage"
+        readOnly={!canEdit}
       />
       <input
         className="stream-label-input participant-label-input"
         value={label}
-        onChange={(e) => setLabel(e.target.value)}
+        onChange={(e) => canEdit && setLabel(e.target.value)}
         onBlur={saveLabel}
         onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+        readOnly={!canEdit}
       />
-      <button
-        className="btn btn-danger btn-sm"
-        onClick={() => deleteParticipant(participant.id)}
-      >
-        Supprimer
-      </button>
+      {canEdit && (
+        <button
+          className="btn btn-danger btn-sm"
+          onClick={() => deleteParticipant(participant.id)}
+        >
+          Supprimer
+        </button>
+      )}
     </div>
   );
 }

@@ -67,7 +67,7 @@ const VIRTUAL_TYPES = [
 
 // ── Config page ────────────────────────────────────────────────────────────
 
-export default function ConfigPage({ config, onUpdate }) {
+export default function ConfigPage({ config, onUpdate, canEditStreams = false }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [iframeInput, setIframeInput] = useState('');
   const [streamLabel, setStreamLabel] = useState('');
@@ -237,17 +237,21 @@ export default function ConfigPage({ config, onUpdate }) {
         <p className="hint" style={{ marginBottom: 12 }}>
           Ces flux affichent les classements et résultats en temps réel.
         </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {VIRTUAL_TYPES.map((vt) => (
-            <button
-              key={vt.type}
-              className="btn btn-secondary"
-              onClick={() => handleAddVirtual(vt)}
-            >
-              {vt.icon} {vt.label}
-            </button>
-          ))}
-        </div>
+        {canEditStreams ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {VIRTUAL_TYPES.map((vt) => (
+              <button
+                key={vt.type}
+                className="btn btn-secondary"
+                onClick={() => handleAddVirtual(vt)}
+              >
+                {vt.icon} {vt.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="hint">Vous n'avez pas le droit d'ajouter des flux.</p>
+        )}
       </section>
 
       {/* ── Bibliothèque de flux ── */}
@@ -272,42 +276,46 @@ export default function ConfigPage({ config, onUpdate }) {
                   )}
                 </div>
                 <div className="stream-info">
-                  <input
-                    className="stream-label-input"
-                    value={stream.label}
-                    onChange={(e) => handleRenameStream(stream.id, e.target.value)}
-                  />
+                  {canEditStreams ? (
+                    <input
+                      className="stream-label-input"
+                      value={stream.label}
+                      onChange={(e) => handleRenameStream(stream.id, e.target.value)}
+                    />
+                  ) : (
+                    <span className="stream-label-input" style={{ cursor: 'default' }}>{stream.label}</span>
+                  )}
                   <div className="stream-url" title={stream.videoUrl ?? stream.type}>
                     {vtype ? vtype.label : stream.videoUrl}
                   </div>
                 </div>
-                {vtype?.type === 'courses-terminees' ? (
-                  <DelayPicker
-                    value={stream.delay ?? 10}
-                    onChange={(d) => handleDelayChange(stream.id, d)}
-                  />
-                ) : !vtype ? (
-                  <RotationPicker
-                    value={streamRotation(stream)}
-                    onChange={(r) => handleRotationChange(stream.id, r)}
-                  />
-                ) : null}
-                <button
-                  className="btn btn-danger btn-sm"
-                  onClick={() => handleRemoveStream(stream.id)}
-                >
-                  Supprimer
-                </button>
+                {canEditStreams && (
+                  <>
+                    {vtype?.type === 'courses-terminees' ? (
+                      <DelayPicker
+                        value={stream.delay ?? 10}
+                        onChange={(d) => handleDelayChange(stream.id, d)}
+                      />
+                    ) : !vtype ? (
+                      <RotationPicker
+                        value={streamRotation(stream)}
+                        onChange={(r) => handleRotationChange(stream.id, r)}
+                      />
+                    ) : null}
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => handleRemoveStream(stream.id)}
+                    >
+                      Supprimer
+                    </button>
+                  </>
+                )}
               </div>
             );
           })}
         </div>
 
-        {!showAddForm ? (
-          <button className="btn btn-primary" onClick={() => setShowAddForm(true)}>
-            + Ajouter un flux
-          </button>
-        ) : (
+        {canEditStreams && (showAddForm ? (
           <div className="add-stream-form">
             <label className="form-label">Nom du flux</label>
             <input
@@ -350,7 +358,11 @@ export default function ConfigPage({ config, onUpdate }) {
               </button>
             </div>
           </div>
-        )}
+        ) : (
+          <button className="btn btn-primary" onClick={() => setShowAddForm(true)}>
+            + Ajouter un flux
+          </button>
+        ))}
       </section>
     </div>
   );

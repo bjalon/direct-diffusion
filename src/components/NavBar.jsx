@@ -1,18 +1,20 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 
-const LINKS = [
-  { to: '/',             label: 'Affichage' },
-  { to: '/config',       label: 'Flux' },
-  { to: '/participants', label: 'Participants' },
-  { to: '/results',      label: 'Résultats' },
+const ALL_LINKS = [
+  { to: '/',             label: 'Affichage',    role: null },
+  { to: '/config',       label: 'Flux',         role: null },
+  { to: '/participants', label: 'Participants',  role: 'results' },
+  { to: '/results',      label: 'Résultats',    role: 'results' },
 ];
 
-export default function NavBar({ user, onLogout }) {
+export default function NavBar({ user, onLogout, roles }) {
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
 
   const close = () => setOpen(false);
+
+  const links = ALL_LINKS.filter(({ role }) => !role || roles?.[role]);
 
   return (
     <nav className="navbar">
@@ -21,7 +23,7 @@ export default function NavBar({ user, onLogout }) {
 
       {/* Links — hidden on small screens */}
       <div className="navbar-links">
-        {LINKS.map(({ to, label }) => (
+        {links.map(({ to, label }) => (
           <Link key={to} to={to} className={pathname === to ? 'active' : ''}>
             {label}
           </Link>
@@ -50,7 +52,7 @@ export default function NavBar({ user, onLogout }) {
         <>
           <div className="navbar-backdrop" onClick={close} />
           <div className="navbar-dropdown">
-            {LINKS.map(({ to, label }) => (
+            {links.map(({ to, label }) => (
               <Link
                 key={to}
                 to={to}

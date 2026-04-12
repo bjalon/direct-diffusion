@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
-import { subscribeStreams, saveStreams, seedStreamsIfEmpty, isAuthorized } from './firebase/streams';
+import { subscribeStreams, saveStreams, seedStreamsIfEmpty, getUserRoles } from './firebase/streams';
 import { loadConfig, saveConfig } from './utils/storage';
 import { buildSrcFromUrl } from './utils/iframeParser';
 import NavBar from './components/NavBar';
@@ -42,8 +42,8 @@ function normaliseStream(raw) {
 export default function App() {
   // null = checking auth, false = not authenticated, object = authenticated user
   const [user, setUser] = useState(null);
-  // null = checking, true = ok, false = denied
-  const [authorized, setAuthorized] = useState(null);
+  // null = checking, false = denied, object = roles doc { admin_flux?, results? }
+  const [roles, setRoles] = useState(null);
 
   // Layout + slot assignments (persisted to localStorage)
   const [layoutSlots, setLayoutSlots] = useState(loadConfig);
@@ -55,22 +55,22 @@ export default function App() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u ?? false);
-      if (!u) setAuthorized(null);
+      if (!u) setRoles(null);
     });
     return unsub;
   }, []);
 
-  // ── Authorization check ─────────────────────────────────────────────────────
+  // ── Authorization + roles ───────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
-    isAuthorized(user.email)
-      .then(setAuthorized)
-      .catch(() => setAuthorized(false));
+    getUserRoles(user.email)
+      .then((r) => setRoles(r ?? false))
+      .catch(() => setRoles(false));
   }, [user]);
 
   // ── Firestore subscription + seed (only when authorized) ──────────────────
   useEffect(() => {
-    if (!user || authorized !== true) {
+    if (!user || !roles || roles === false) {
       setStreams([]);
       return;
     }
@@ -89,7 +89,7 @@ export default function App() {
       .catch(() => {});
 
     return unsub;
-  }, [user, authorized]);
+  }, [user, roles]);
 
   // ── Config updater ──────────────────────────────────────────────────────────
   // Accepts the same (updater | nextConfig) signature as before.
@@ -103,8 +103,8 @@ export default function App() {
     setLayoutSlots(nextLayoutSlots);
     saveConfig(nextLayoutSlots);
 
-    // Persist streams if changed
-    if (nextStreams !== streams) {
+    // Persist streams only if user has stream admin role
+    if (nextStreams !== streams && roles?.admin_flux) {
       saveStreams(nextStreams);
     }
   };
@@ -112,7 +112,7 @@ export default function App() {
   const handleLogout = () => signOut(auth);
 
   // ── Loading ─────────────────────────────────────────────────────────────────
-  if (user === null || (user && authorized === null)) {
+  if (user === null || (user && roles === null)) {
     return (
       <div className="app-loading">
         <div className="login-spinner" />
@@ -126,7 +126,7 @@ export default function App() {
   }
 
   // ── Not authorized ──────────────────────────────────────────────────────────
-  if (authorized === false) {
+  if (roles === false) {
     return (
       <div className="login-page">
         <div className="login-card">
@@ -157,13 +157,15 @@ export default function App() {
   return (
     <HashRouter>
       <div className="app-root">
-        <NavBar user={user} onLogout={handleLogout} />
+        <NavBar user={user} onLogout={handleLogout} roles={roles} />
         <main className="app-main">
           <Routes>
             <Route path="/" element={<DisplayPage config={config} />} />
-            <Route path="/config" element={<ConfigPage config={config} onUpdate={updateConfig} />} />
-            <Route path="/participants" element={<ParticipantsPage />} />
-            <Route path="/results" element={<ResultsPage />} />
+            <Route path="/config" element={
+              <ConfigPage config={config} onUpdate={updateConfig} canEditStreams={!!roles?.admin_flux} />
+            } />
+            <Route path="/participants" element={<ParticipantsPage canEdit={!!roles?.results} />} />
+            <Route path="/results" element={<ResultsPage canEdit={!!roles?.results} />} />
           </Routes>
         </main>
       </div>
