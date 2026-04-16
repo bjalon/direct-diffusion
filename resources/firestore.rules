@@ -1,0 +1,61 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email != null;
+    }
+
+    function userEmail() {
+      return lower(request.auth.token.email);
+    }
+
+    function userEntry() {
+      return get(/databases/$(database)/documents/allowedUsers/$(userEmail()));
+    }
+
+    function isAllowedUser() {
+      return signedIn() && userEntry().exists();
+    }
+
+    function hasRole(role) {
+      return isAllowedUser() && userEntry().data[role] == true;
+    }
+
+    match /allowedUsers/{email} {
+      allow get: if signedIn() && lower(email) == userEmail();
+      allow list: if hasRole('administration');
+      allow create, update, delete: if hasRole('administration');
+    }
+
+    match /accessRequests/{email} {
+      allow create: if signedIn()
+                    && lower(email) == userEmail()
+                    && lower(request.resource.data.email) == userEmail()
+                    && request.resource.data.status == 'pending';
+      allow get: if hasRole('administration') || (signedIn() && lower(email) == userEmail());
+      allow list: if hasRole('administration');
+      allow update, delete: if hasRole('administration');
+    }
+
+    match /config/streams {
+      allow read: if isAllowedUser();
+      allow write: if hasRole('admin_flux');
+    }
+
+    match /participants/{participantId} {
+      allow read: if isAllowedUser();
+      allow write: if hasRole('results');
+    }
+
+    match /races/{raceId} {
+      allow read: if isAllowedUser();
+      allow write: if hasRole('results');
+
+      match /results/{resultId} {
+        allow read: if isAllowedUser();
+        allow write: if hasRole('results');
+      }
+    }
+  }
+}
