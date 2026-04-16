@@ -9,6 +9,7 @@ import {
   completeCurrentCompetitor,
   mirrorPendingStartClicks,
   releaseStation,
+  setStartStationCourse,
   submitResultAccessRequest,
   subscribeCurrentCompetitor,
   subscribeResultAccess,
@@ -188,6 +189,23 @@ export default function ResultsPage({ user, onLogout }) {
       setCourseDraft(currentCompetitor.courseLabel || currentCompetitor.courseId);
     }
   }, [currentCompetitor?.courseId, currentCompetitor?.courseLabel, selectedStation]);
+
+  useEffect(() => {
+    if (selectedStation !== 'start' || currentCompetitor?.courseId) return;
+    const stationCourseId = stationDocs.start?.currentCourseId;
+    if (stationCourseId) {
+      setCurrentCourse({
+        courseId: stationCourseId,
+        courseLabel: stationDocs.start?.currentCourseLabel || stationCourseId,
+      });
+      setCourseDraft(stationDocs.start?.currentCourseLabel || stationCourseId);
+    }
+  }, [
+    selectedStation,
+    currentCompetitor?.courseId,
+    stationDocs.start?.currentCourseId,
+    stationDocs.start?.currentCourseLabel,
+  ]);
 
   useEffect(() => () => {
     if (selectedStation && actor?.uid) {
@@ -424,6 +442,34 @@ function StartStationView({
     }, {}),
     [currentCourseSummary],
   );
+  const recentCourses = useMemo(() => {
+    const byCourse = new Map();
+
+    if (currentCourse?.courseId) {
+      byCourse.set(currentCourse.courseId, {
+        courseId: currentCourse.courseId,
+        courseLabel: currentCourse.courseLabel || currentCourse.courseId,
+        lastActivityMs: Number.MAX_SAFE_INTEGER,
+      });
+    }
+
+    resultEvents.forEach((event) => {
+      if (!event.active || !event.courseId) return;
+      const lastActivityMs = event.clickedAtClientMs ?? 0;
+      const existing = byCourse.get(event.courseId);
+      if (!existing || lastActivityMs > existing.lastActivityMs) {
+        byCourse.set(event.courseId, {
+          courseId: event.courseId,
+          courseLabel: event.courseLabel || event.courseId,
+          lastActivityMs,
+        });
+      }
+    });
+
+    return [...byCourse.values()]
+      .sort((a, b) => b.lastActivityMs - a.lastActivityMs)
+      .slice(0, 12);
+  }, [currentCourse, resultEvents]);
 
   const appendStartClick = async () => {
     if (!currentCompetitor?.runId) return;
@@ -461,18 +507,74 @@ function StartStationView({
           <div className="form-actions">
             <button
               className="btn btn-primary"
-              disabled={!courseDraft.trim()}
-              onClick={() => {
+              disabled={!courseDraft.trim() || busyAction === 'course'}
+              onClick={async () => {
                 const label = courseDraft.trim();
-                setCurrentCourse({
+                const nextCourse = {
                   courseId: createCourseId(label),
                   courseLabel: label,
-                });
+                };
+                setBusyAction('course');
+                setActionError('');
+                try {
+                  await setStartStationCourse({
+                    uid: actor.uid,
+                    courseId: nextCourse.courseId,
+                    courseLabel: nextCourse.courseLabel,
+                  });
+                  setCurrentCourse(nextCourse);
+                } catch (error) {
+                  log.error('setting start station course failed', error);
+                  setActionError(getErrorLabel(error));
+                } finally {
+                  setBusyAction('');
+                }
               }}
             >
-              Valider la course
+              {busyAction === 'course' ? 'Validation…' : 'Valider la course'}
             </button>
           </div>
+          {recentCourses.length > 0 && (
+            <div className="results-course-history">
+              <div className="results-course-history-title">Courses disponibles</div>
+              <div className="results-course-history-list">
+                {recentCourses.map((course) => (
+                  <button
+                    key={course.courseId}
+                    type="button"
+                    className="results-course-history-item"
+                    disabled={busyAction === 'course'}
+                    onClick={async () => {
+                      setBusyAction('course');
+                      setActionError('');
+                      try {
+                        await setStartStationCourse({
+                          uid: actor.uid,
+                          courseId: course.courseId,
+                          courseLabel: course.courseLabel,
+                        });
+                        setCurrentCourse({
+                          courseId: course.courseId,
+                          courseLabel: course.courseLabel,
+                        });
+                        setCourseDraft(course.courseLabel);
+                      } catch (error) {
+                        log.error('selecting existing course failed', error);
+                        setActionError(getErrorLabel(error));
+                      } finally {
+                        setBusyAction('');
+                      }
+                    }}
+                  >
+                    <span>{course.courseLabel}</span>
+                    {course.lastActivityMs === Number.MAX_SAFE_INTEGER && (
+                      <span className="results-course-history-badge">En cours</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </ResultsShell>
     );
@@ -488,11 +590,27 @@ function StartStationView({
         onReleaseStation={onReleaseStation}
         onChangeCourse={() => {
           if (!canChangeCourse) return;
-          setCurrentCourse(null);
-          setCourseDraft('');
+          setBusyAction('change-course');
+          setActionError('');
+          setStartStationCourse({
+            uid: actor.uid,
+            courseId: null,
+            courseLabel: '',
+          })
+            .then(() => {
+              setCurrentCourse(null);
+              setCourseDraft('');
+            })
+            .catch((error) => {
+              log.error('clearing start station course failed', error);
+              setActionError(getErrorLabel(error));
+            })
+            .finally(() => {
+              setBusyAction('');
+            });
         }}
         onLogout={onLogout}
-        canChangeCourse={canChangeCourse}
+        canChangeCourse={canChangeCourse && busyAction !== 'change-course'}
       />
 
       {actionError && <div className="form-error">{actionError}</div>}

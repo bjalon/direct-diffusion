@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LAYOUTS, generateId } from '../utils/storage';
 import { parseInput } from '../utils/iframeParser';
+import { BUILTIN_VIRTUAL_STREAM, BUILTIN_VIRTUAL_STREAM_ID } from '../utils/virtualDisplay';
 import LayoutPicker from '../components/LayoutPicker';
 
 // ── Rotation picker ────────────────────────────────────────────────────────
@@ -36,7 +37,7 @@ function RotationPicker({ value, onChange }) {
   );
 }
 
-// ── Delay picker (for courses-terminees) ──────────────────────────────────
+// ── Delay picker ───────────────────────────────────────────────────────────
 
 const DELAY_OPTIONS = [5, 10, 15, 30, 60];
 
@@ -57,14 +58,6 @@ function DelayPicker({ value, onChange }) {
   );
 }
 
-// ── Virtual stream definitions ─────────────────────────────────────────────
-
-const VIRTUAL_TYPES = [
-  { type: 'classement',        label: 'Classement général',  icon: '🏆' },
-  { type: 'derniere-course',   label: 'Dernière course',     icon: '🏁' },
-  { type: 'courses-terminees', label: 'Courses terminées',   icon: '🔄' },
-];
-
 // ── Config page ────────────────────────────────────────────────────────────
 
 export default function ConfigPage({ config, onUpdate, canEditStreams = false }) {
@@ -76,6 +69,8 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
 
   const layout = LAYOUTS[config.layout] ?? LAYOUTS['1'];
   const { cols, slots: slotCount } = layout;
+  const videoStreams = config.streams.filter((stream) => !stream.type);
+  const availableStreams = [{ ...BUILTIN_VIRTUAL_STREAM, delay: config.virtualDisplayDelay ?? 10 }, ...videoStreams];
 
   // --- Layout ---
   const handleLayoutChange = (newLayout) => {
@@ -135,18 +130,6 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
     setShowAddForm(false);
   };
 
-  // --- Add virtual stream ---
-  const handleAddVirtual = (vtype) => {
-    const id = generateId();
-    onUpdate((prev) => ({
-      ...prev,
-      streams: [
-        ...prev.streams,
-        { id, type: vtype.type, label: vtype.label, rotation: 0, delay: 10 },
-      ],
-    }));
-  };
-
   // --- Remove stream ---
   const handleRemoveStream = (streamId) => {
     onUpdate((prev) => ({
@@ -166,13 +149,11 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
     }));
   };
 
-  // --- Change delay (virtual streams) ---
-  const handleDelayChange = (streamId, newDelay) => {
+  // --- Change virtual display delay ---
+  const handleDelayChange = (newDelay) => {
     onUpdate((prev) => ({
       ...prev,
-      streams: prev.streams.map((s) =>
-        s.id === streamId ? { ...s, delay: newDelay } : s
-      ),
+      virtualDisplayDelay: newDelay,
     }));
   };
 
@@ -198,7 +179,7 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
       {/* ── Assignation des flux aux emplacements ── */}
       <section className="config-section">
         <h2 className="section-title">Assignation des flux</h2>
-        {config.streams.length === 0 ? (
+        {availableStreams.length === 0 ? (
           <p className="hint">Ajoutez d'abord des flux dans la section ci-dessous.</p>
         ) : (
           <div
@@ -207,7 +188,7 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
           >
             {Array.from({ length: slotCount }, (_, i) => {
               const assignedId = config.slots[i] || '';
-              const assignedStream = config.streams.find((s) => s.id === assignedId);
+              const assignedStream = availableStreams.find((s) => s.id === assignedId);
               return (
                 <div key={i} className="slot-cell">
                   <div className="slot-index">Emplacement {i + 1}</div>
@@ -217,7 +198,9 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
                     onChange={(e) => handleSlotAssign(i, e.target.value)}
                   >
                     <option value="">— Aucun —</option>
-                    {config.streams.map((s) => (
+                    <option value={BUILTIN_VIRTUAL_STREAM_ID}>{BUILTIN_VIRTUAL_STREAM.label}</option>
+                    {videoStreams.length > 0 && <option value="" disabled>──────── Flux vidéo ────────</option>}
+                    {videoStreams.map((s) => (
                       <option key={s.id} value={s.id}>{s.label}</option>
                     ))}
                   </select>
@@ -235,23 +218,9 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
       <section className="config-section">
         <h2 className="section-title">Affichages virtuels</h2>
         <p className="hint" style={{ marginBottom: 12 }}>
-          Ces flux affichent les classements et résultats en temps réel.
+          Le flux virtuel “Résultats” alterne entre les courses terminées et le classement général.
         </p>
-        {canEditStreams ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {VIRTUAL_TYPES.map((vt) => (
-              <button
-                key={vt.type}
-                className="btn btn-secondary"
-                onClick={() => handleAddVirtual(vt)}
-              >
-                {vt.icon} {vt.label}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className="hint">Vous n'avez pas le droit d'ajouter des flux.</p>
-        )}
+        <DelayPicker value={config.virtualDisplayDelay ?? 10} onChange={handleDelayChange} />
       </section>
 
       {/* ── Bibliothèque de flux ── */}
@@ -259,21 +228,16 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
         <h2 className="section-title">Flux vidéo</h2>
 
         <div className="stream-list">
-          {config.streams.length === 0 && (
+          {videoStreams.length === 0 && (
             <div className="stream-empty">Aucun flux ajouté pour l'instant.</div>
           )}
-          {config.streams.map((stream) => {
-            const vtype = VIRTUAL_TYPES.find((v) => v.type === stream.type);
+          {videoStreams.map((stream) => {
             return (
               <div key={stream.id} className="stream-item">
-                <div className="stream-thumb" title={vtype ? vtype.label : 'Flux Facebook'}>
-                  {vtype ? (
-                    <span style={{ fontSize: 20 }}>{vtype.icon}</span>
-                  ) : (
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M21.582 6.186a2.506 2.506 0 0 0-1.765-1.77C18.254 4 12 4 12 4s-6.254 0-7.817.416a2.506 2.506 0 0 0-1.765 1.77C2 7.757 2 12 2 12s0 4.243.418 5.814a2.506 2.506 0 0 0 1.765 1.77C5.746 20 12 20 12 20s6.254 0 7.817-.416a2.506 2.506 0 0 0 1.765-1.77C22 16.243 22 12 22 12s0-4.243-.418-5.814zM10 15.464V8.536L16 12l-6 3.464z"/>
-                    </svg>
-                  )}
+                <div className="stream-thumb" title="Flux Facebook">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M21.582 6.186a2.506 2.506 0 0 0-1.765-1.77C18.254 4 12 4 12 4s-6.254 0-7.817.416a2.506 2.506 0 0 0-1.765 1.77C2 7.757 2 12 2 12s0 4.243.418 5.814a2.506 2.506 0 0 0 1.765 1.77C5.746 20 12 20 12 20s6.254 0 7.817-.416a2.506 2.506 0 0 0 1.765-1.77C22 16.243 22 12 22 12s0-4.243-.418-5.814zM10 15.464V8.536L16 12l-6 3.464z"/>
+                  </svg>
                 </div>
                 <div className="stream-info">
                   {canEditStreams ? (
@@ -285,23 +249,16 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
                   ) : (
                     <span className="stream-label-input" style={{ cursor: 'default' }}>{stream.label}</span>
                   )}
-                  <div className="stream-url" title={stream.videoUrl ?? stream.type}>
-                    {vtype ? vtype.label : stream.videoUrl}
+                  <div className="stream-url" title={stream.videoUrl}>
+                    {stream.videoUrl}
                   </div>
                 </div>
                 {canEditStreams && (
                   <>
-                    {vtype?.type === 'courses-terminees' ? (
-                      <DelayPicker
-                        value={stream.delay ?? 10}
-                        onChange={(d) => handleDelayChange(stream.id, d)}
-                      />
-                    ) : !vtype ? (
-                      <RotationPicker
-                        value={streamRotation(stream)}
-                        onChange={(r) => handleRotationChange(stream.id, r)}
-                      />
-                    ) : null}
+                    <RotationPicker
+                      value={streamRotation(stream)}
+                      onChange={(r) => handleRotationChange(stream.id, r)}
+                    />
                     <button
                       className="btn btn-danger btn-sm"
                       onClick={() => handleRemoveStream(stream.id)}

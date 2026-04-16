@@ -13,7 +13,7 @@ const STORAGE_KEY = 'direct-diffusion-config';
 function buildEnvDefault() {
   const layout = import.meta.env.VITE_DEFAULT_LAYOUT || '1';
   const resolvedLayout = LAYOUTS[layout] ? layout : '1';
-  return { layout: resolvedLayout, slots: {} };
+  return { layout: resolvedLayout, slots: {}, virtualDisplayDelay: 10 };
 }
 
 export function loadConfig() {
@@ -21,15 +21,15 @@ export function loadConfig() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return buildEnvDefault();
     const saved = JSON.parse(raw);
-    return { layout: '1', slots: {}, ...saved };
+    return { layout: '1', slots: {}, virtualDisplayDelay: 10, ...saved };
   } catch {
     return buildEnvDefault();
   }
 }
 
 /** Save only layout and slots — streams are stored in Firestore, not localStorage. */
-export function saveConfig({ layout, slots }) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ layout, slots }));
+export function saveConfig({ layout, slots, virtualDisplayDelay }) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ layout, slots, virtualDisplayDelay }));
 }
 
 export function generateId() {

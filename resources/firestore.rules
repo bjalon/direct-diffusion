@@ -67,6 +67,21 @@ service cloud.firestore {
              || (stationId == 'finish' && hasResultRole('results_finish'));
     }
 
+    function canClaimStation(stationId) {
+      return canManageStation(stationId)
+             && request.resource.data.assignedUid == request.auth.uid
+             && (!exists(/databases/$(database)/documents/resultStations/$(stationId))
+                 || resource.data.assignedUid == null
+                 || resource.data.assignedUid == request.auth.uid);
+    }
+
+    function canReleaseStation(stationId) {
+      return canManageStation(stationId)
+             && exists(/databases/$(database)/documents/resultStations/$(stationId))
+             && resource.data.assignedUid == request.auth.uid
+             && request.resource.data.assignedUid == null;
+    }
+
     match /allowedUsers/{email} {
       allow get: if hasEmail() && email == authEmail();
       allow list: if isAdministration();
@@ -101,10 +116,7 @@ service cloud.firestore {
 
     match /resultStations/{stationId} {
       allow read: if isAdministration() || hasGrantedResultAccess();
-      allow create, update: if canManageStation(stationId)
-                            && request.resource.data.assignedUid == request.auth.uid
-                            && (!exists(/databases/$(database)/documents/resultStations/$(stationId))
-                                || resource.data.assignedUid == request.auth.uid);
+      allow create, update: if canClaimStation(stationId) || canReleaseStation(stationId);
       allow delete: if isAdministration()
                     || (canManageStation(stationId)
                         && resource.data.assignedUid == request.auth.uid);

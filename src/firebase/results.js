@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   deleteDoc,
   doc,
   getDoc,
@@ -184,8 +185,37 @@ export async function claimStation(station, actor) {
       assignedUid: actor.uid,
       assignedEmail: actor.email ?? '',
       assignedProviderId: actor.providerId ?? 'anonymous',
+      ...(station === 'start'
+        ? {
+            currentCourseId: null,
+            currentCourseLabel: '',
+          }
+        : {}),
       updatedAt: serverTimestamp(),
       assignedAt: serverTimestamp(),
+    }, { merge: true });
+  });
+}
+
+export async function setStartStationCourse({ uid, courseId, courseLabel }) {
+  log.info('setStartStationCourse start', { uid, courseId, courseLabel });
+  await runTransaction(db, async (transaction) => {
+    const ref = RESULT_STATION('start');
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) {
+      throw new Error('station-not-claimed');
+    }
+
+    const data = snap.data();
+    if (data.assignedUid !== uid) {
+      throw new Error('station-not-owned');
+    }
+
+    transaction.set(ref, {
+      currentCourseId: courseId ?? null,
+      currentCourseLabel: courseId ? (courseLabel ?? '') : '',
+      currentCourseUpdatedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     }, { merge: true });
   });
 }
@@ -197,6 +227,17 @@ export async function releaseStation(station, uid) {
     const snap = await transaction.get(ref);
     if (!snap.exists()) return;
     if (snap.data().assignedUid !== uid) return;
+    if (station === 'start') {
+      transaction.set(ref, {
+        assignedUid: null,
+        assignedEmail: '',
+        assignedProviderId: '',
+        assignedAt: deleteField(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      return;
+    }
+
     transaction.delete(ref);
   });
 }

@@ -1,12 +1,8 @@
 import { useRef, useState, useEffect } from 'react';
-import ClassementDisplay       from './displays/ClassementDisplay';
-import RaceResultsDisplay      from './displays/RaceResultsDisplay';
-import CoursesTermineesDisplay from './displays/CoursesTermineesDisplay';
+import ResultsRotationDisplay from './displays/ResultsRotationDisplay';
 
 const VIRTUAL_COMPONENTS = {
-  'classement':          (s) => <ClassementDisplay />,
-  'derniere-course':     (s) => <RaceResultsDisplay />,
-  'courses-terminees':   (s) => <CoursesTermineesDisplay delay={s.delay ?? 10} />,
+  'results-rotation': (s) => <ResultsRotationDisplay delay={s.delay ?? 10} />,
 };
 
 /**

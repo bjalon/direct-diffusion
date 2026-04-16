@@ -1498,6 +1498,63 @@ html, body, #root {
   border-radius: 14px;
 }
 
+.results-course-history {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.results-course-history-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.results-course-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.results-course-history-item {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.results-course-history-item:hover {
+  border-color: rgba(24,119,242,0.45);
+  background: rgba(24,119,242,0.08);
+}
+
+.results-course-history-badge {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(24,119,242,0.16);
+  border: 1px solid rgba(24,119,242,0.35);
+  color: #5ba1ff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .results-shell-head {
   display: flex;
   flex-direction: column;

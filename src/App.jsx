@@ -15,6 +15,7 @@ import LoginPage from './pages/LoginPage';
 import ParticipantsPage from './pages/ParticipantsPage';
 import ResultsAuditPage from './pages/ResultsAuditPage';
 import ResultsPage from './pages/ResultsPage';
+import { BUILTIN_VIRTUAL_STREAM } from './utils/virtualDisplay';
 
 function orientationToRotation(orientation) {
   const map = { 'landscape-ccw': -90, 'landscape-cw': 90, landscape: -90, portrait: 0 };
@@ -153,7 +154,13 @@ export default function App() {
       <AppShell
         user={user}
         permissions={permissions}
-        config={{ ...layoutSlots, streams }}
+        config={{
+          ...layoutSlots,
+          streams: [
+            { ...BUILTIN_VIRTUAL_STREAM, delay: layoutSlots.virtualDisplayDelay ?? 10 },
+            ...streams.filter((stream) => !stream.type),
+          ],
+        }}
         updateConfig={updateConfig}
         accessRequestState={accessRequestState}
         setAccessRequestState={setAccessRequestState}
