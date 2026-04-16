@@ -107,10 +107,10 @@ service cloud.firestore {
     }
 
     match /accessRequests/{email} {
-      allow create: if hasEmail()
-                    && email == authEmail()
-                    && request.resource.data.email == authEmail()
-                    && request.resource.data.status == 'pending';
+      allow create, update: if hasEmail()
+                            && email == authEmail()
+                            && request.resource.data.email == authEmail()
+                            && request.resource.data.status == 'pending';
       allow get: if isAdministration() || (hasEmail() && email == authEmail());
       allow list: if isAdministration();
       allow update, delete: if isAdministration();
@@ -124,18 +124,24 @@ service cloud.firestore {
     }
 
     match /resultAccessRequests/{uid} {
-      allow create, update: if isAuthenticated()
-                            && uid == request.auth.uid
-                            && request.resource.data.uid == request.auth.uid
-                            && request.resource.data.status == 'pending';
+      allow create: if (isAuthenticated()
+                        && uid == request.auth.uid
+                        && request.resource.data.uid == request.auth.uid
+                        && request.resource.data.status == 'pending')
+                    || isAdministration();
+      allow update: if (isAuthenticated()
+                        && uid == request.auth.uid
+                        && request.resource.data.uid == request.auth.uid
+                        && request.resource.data.status == 'pending')
+                    || isAdministration();
       allow get: if isAdministration() || (isAuthenticated() && uid == request.auth.uid);
       allow list: if isAdministration();
-      allow update, delete: if isAdministration();
+      allow delete: if isAdministration();
     }
 
     match /resultStations/{stationId} {
       allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
-      allow create, update: if canClaimStation(stationId) || canReleaseStation(stationId);
+      allow create, update: if isAdministration() || canClaimStation(stationId) || canReleaseStation(stationId);
       allow delete: if isAdministration()
                     || (canManageStation(stationId)
                         && resource.data.assignedUid == request.auth.uid);
@@ -143,20 +149,20 @@ service cloud.firestore {
 
     match /currentCompetitor/{docId} {
       allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
-      allow create, update: if docId == 'current' && hasResultRole('results_start');
-      allow delete: if docId == 'current' && (hasResultRole('results_start') || hasResultRole('results_finish'));
+      allow create, update: if isAdministration() || (docId == 'current' && hasResultRole('results_start'));
+      allow delete: if isAdministration() || (docId == 'current' && (hasResultRole('results_start') || hasResultRole('results_finish')));
     }
 
     match /resultEvents/{eventId} {
       allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
-      allow create: if hasGrantedResultAccess();
+      allow create: if isAdministration() || hasGrantedResultAccess();
       allow update: if isAdministration();
-      allow delete: if false;
+      allow delete: if isAdministration();
     }
 
     match /resultRuns/{runId} {
       allow read: if isAllowedUser() || hasGrantedResultAccess() || hasTvAccess();
-      allow create, update: if hasGrantedResultAccess();
+      allow create, update: if isAdministration() || hasGrantedResultAccess();
       allow delete: if isAdministration();
     }
 
@@ -166,12 +172,12 @@ service cloud.firestore {
 
     match /config/streams {
       allow read: if isAllowedUser() || hasTvAccess();
-      allow write: if isAdminFlux();
+      allow write: if isAdminFlux() || isAdministration();
     }
 
     match /participants/{participantId} {
       allow read: if isAllowedUser() || hasGrantedResultAccess();
-      allow write: if isParticipants();
+      allow write: if isParticipants() || isAdministration();
     }
 
     match /races/{raceId} {

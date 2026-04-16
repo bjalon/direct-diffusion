@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   deleteDoc,
   doc,
   onSnapshot,
@@ -58,6 +59,7 @@ export function requestAccess(user) {
       displayName: user.displayName ?? '',
       signInProvider: user?.providerData?.[0]?.providerId ?? '',
       status: 'pending',
+      reviewedAt: deleteField(),
       requestedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     },

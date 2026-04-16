@@ -4,18 +4,27 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
   runTransaction,
   serverTimestamp,
   setDoc,
+  Timestamp,
   updateDoc,
+  where,
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatDurationMs } from '../utils/resultsBuffer';
 import { createLogger } from '../utils/logger';
+import {
+  RESULT_ARCHIVE_FILENAME,
+  RESULT_ARCHIVE_MODEL,
+  RESULT_ARCHIVE_MODEL_VERSION,
+} from '../utils/resultArchiveModel';
+import { createSingleFileZip, readSingleFileZip } from '../utils/zipSingleFile';
 
 const RESULT_ACCESS = (uid) => doc(db, 'allowedResultUsers', uid);
 const RESULT_REQUEST = (uid) => doc(db, 'resultAccessRequests', uid);
@@ -24,6 +33,8 @@ const CURRENT_COMPETITOR = doc(db, 'currentCompetitor', 'current');
 const RESULT_EVENT = (eventId) => doc(db, 'resultEvents', eventId);
 const RESULT_RUN = (runId) => doc(db, 'resultRuns', runId);
 const CLOCK_CHECK = (uid) => doc(db, 'clockChecks', uid);
+const PARTICIPANT = (id) => doc(db, 'participants', id);
+const STREAMS_REF = doc(db, 'config', 'streams');
 const log = createLogger('firebase/results');
 
 function normalizeLightRoles(data) {
@@ -33,6 +44,42 @@ function normalizeLightRoles(data) {
     results_finish: tv ? false : !!data.results_finish,
     tv,
   };
+}
+
+function serializeValue(value) {
+  if (value instanceof Timestamp) {
+    return { __type: 'timestamp', millis: value.toMillis() };
+  }
+  if (Array.isArray(value)) {
+    return value.map(serializeValue);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, serializeValue(entry)]));
+  }
+  return value;
+}
+
+function deserializeValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(deserializeValue);
+  }
+  if (value && typeof value === 'object') {
+    if (value.__type === 'timestamp') {
+      return Timestamp.fromMillis(value.millis);
+    }
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, deserializeValue(entry)]));
+  }
+  return value;
+}
+
+async function getCourseDocs(collectionName, courseId) {
+  const snap = await getDocs(query(collection(db, collectionName), where('courseId', '==', courseId)));
+  return snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+}
+
+async function getAllDocs(collectionName) {
+  const snap = await getDocs(collection(db, collectionName));
+  return snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
 }
 
 export function subscribeResultAccess(uid, onData) {
@@ -592,4 +639,258 @@ export function toggleResultEventActive(eventId, active) {
     active,
     updatedAt: serverTimestamp(),
   });
+}
+
+export async function exportCourseArchive(courseId) {
+  log.info('exportCourseArchive start', { courseId });
+  const [resultEvents, resultRuns, currentSnap, startStationSnap, finishStationSnap] = await Promise.all([
+    getCourseDocs('resultEvents', courseId),
+    getCourseDocs('resultRuns', courseId),
+    getDoc(CURRENT_COMPETITOR),
+    getDoc(RESULT_STATION('start')),
+    getDoc(RESULT_STATION('finish')),
+  ]);
+
+  const currentCompetitor = currentSnap.exists() && currentSnap.data().courseId === courseId
+    ? { id: currentSnap.id, ...currentSnap.data() }
+    : null;
+
+  const startStation = startStationSnap.exists() && startStationSnap.data().currentCourseId === courseId
+    ? { id: startStationSnap.id, ...startStationSnap.data() }
+    : null;
+  const finishStation = finishStationSnap.exists()
+    ? { id: finishStationSnap.id, ...finishStationSnap.data() }
+    : null;
+
+  const courseLabel =
+    resultRuns[0]?.courseLabel
+    || resultEvents[0]?.courseLabel
+    || currentCompetitor?.courseLabel
+    || startStation?.currentCourseLabel
+    || courseId;
+
+  const payload = {
+    archiveType: RESULT_ARCHIVE_MODEL.name,
+    exportedAt: new Date().toISOString(),
+    model: RESULT_ARCHIVE_MODEL,
+    course: {
+      courseId,
+      courseLabel,
+    },
+    data: serializeValue({
+      resultEvents,
+      resultRuns,
+      currentCompetitor,
+      startStation,
+      finishStation,
+    }),
+  };
+
+  const json = JSON.stringify(payload, null, 2);
+  const blob = createSingleFileZip(RESULT_ARCHIVE_FILENAME, json);
+  return {
+    blob,
+    filename: `${courseLabel || courseId}.zip`.replace(/[^\w.-]+/g, '_'),
+  };
+}
+
+export async function deleteCourseData(courseId) {
+  log.info('deleteCourseData start', { courseId });
+  const [resultEvents, resultRuns, currentSnap, startStationSnap] = await Promise.all([
+    getDocs(query(collection(db, 'resultEvents'), where('courseId', '==', courseId))),
+    getDocs(query(collection(db, 'resultRuns'), where('courseId', '==', courseId))),
+    getDoc(CURRENT_COMPETITOR),
+    getDoc(RESULT_STATION('start')),
+  ]);
+
+  const batch = writeBatch(db);
+  resultEvents.docs.forEach((entry) => batch.delete(entry.ref));
+  resultRuns.docs.forEach((entry) => batch.delete(entry.ref));
+
+  if (currentSnap.exists() && currentSnap.data().courseId === courseId) {
+    batch.delete(CURRENT_COMPETITOR);
+  }
+
+  if (startStationSnap.exists() && startStationSnap.data().currentCourseId === courseId) {
+    batch.set(RESULT_STATION('start'), {
+      currentCourseId: null,
+      currentCourseLabel: '',
+      currentCourseUpdatedAt: deleteField(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }
+
+  await batch.commit();
+}
+
+export async function deleteAllResultsData() {
+  log.info('deleteAllResultsData start');
+  const [allEvents, allRuns, allStations, currentSnap, allParticipants, allLightUsers, allLightRequests] = await Promise.all([
+    getDocs(collection(db, 'resultEvents')),
+    getDocs(collection(db, 'resultRuns')),
+    getDocs(collection(db, 'resultStations')),
+    getDoc(CURRENT_COMPETITOR),
+    getDocs(collection(db, 'participants')),
+    getDocs(collection(db, 'allowedResultUsers')),
+    getDocs(collection(db, 'resultAccessRequests')),
+  ]);
+
+  const batch = writeBatch(db);
+  allEvents.docs.forEach((entry) => batch.delete(entry.ref));
+  allRuns.docs.forEach((entry) => batch.delete(entry.ref));
+  allStations.docs.forEach((entry) => batch.delete(entry.ref));
+  allParticipants.docs.forEach((entry) => batch.delete(entry.ref));
+  allLightUsers.docs.forEach((entry) => batch.delete(entry.ref));
+  allLightRequests.docs.forEach((entry) => batch.delete(entry.ref));
+
+  if (currentSnap.exists()) {
+    batch.delete(CURRENT_COMPETITOR);
+  }
+
+  batch.set(STREAMS_REF, { streams: [] });
+  await batch.commit();
+}
+
+export async function exportAllResultsArchive() {
+  log.info('exportAllResultsArchive start');
+  const [resultEvents, resultRuns, currentSnap, stationSnaps, participants, streamsSnap, allowedResultUsers, resultAccessRequests] = await Promise.all([
+    getAllDocs('resultEvents'),
+    getAllDocs('resultRuns'),
+    getDoc(CURRENT_COMPETITOR),
+    getDocs(collection(db, 'resultStations')),
+    getAllDocs('participants'),
+    getDoc(STREAMS_REF),
+    getAllDocs('allowedResultUsers'),
+    getAllDocs('resultAccessRequests'),
+  ]);
+
+  const stations = stationSnaps.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+  const streams = streamsSnap.exists() ? (streamsSnap.data().streams ?? []) : [];
+  const payload = {
+    archiveType: RESULT_ARCHIVE_MODEL.name,
+    exportedAt: new Date().toISOString(),
+    model: RESULT_ARCHIVE_MODEL,
+    scope: 'all',
+    data: serializeValue({
+      resultEvents,
+      resultRuns,
+      currentCompetitor: currentSnap.exists() ? { id: currentSnap.id, ...currentSnap.data() } : null,
+      resultStations: stations,
+      participants,
+      streams,
+      allowedResultUsers,
+      resultAccessRequests,
+    }),
+  };
+
+  const json = JSON.stringify(payload, null, 2);
+  const blob = createSingleFileZip(RESULT_ARCHIVE_FILENAME, json);
+  return {
+    blob,
+    filename: 'direct-diffusion-results-all.zip',
+  };
+}
+
+export async function restoreCourseArchive(fileOrBlob) {
+  log.info('restoreCourseArchive start');
+  const { filename, content } = await readSingleFileZip(fileOrBlob);
+  if (filename !== RESULT_ARCHIVE_FILENAME) {
+    throw new Error('archive-invalid-file');
+  }
+
+  const parsed = JSON.parse(content);
+  if (parsed.archiveType !== RESULT_ARCHIVE_MODEL.name) {
+    throw new Error('archive-invalid-type');
+  }
+
+  const archiveVersion = Number(parsed?.model?.version);
+  if (archiveVersion !== RESULT_ARCHIVE_MODEL_VERSION) {
+    throw new Error(`archive-version-mismatch:${archiveVersion}`);
+  }
+
+  const data = deserializeValue(parsed.data ?? {});
+  const batch = writeBatch(db);
+  const scope = parsed.scope || 'course';
+
+  if (scope === 'all') {
+    const [allEvents, allRuns, allStations, currentSnap, allParticipants, allLightUsers, allLightRequests] = await Promise.all([
+      getDocs(collection(db, 'resultEvents')),
+      getDocs(collection(db, 'resultRuns')),
+      getDocs(collection(db, 'resultStations')),
+      getDoc(CURRENT_COMPETITOR),
+      getDocs(collection(db, 'participants')),
+      getDocs(collection(db, 'allowedResultUsers')),
+      getDocs(collection(db, 'resultAccessRequests')),
+    ]);
+    allEvents.docs.forEach((entry) => batch.delete(entry.ref));
+    allRuns.docs.forEach((entry) => batch.delete(entry.ref));
+    allStations.docs.forEach((entry) => batch.delete(entry.ref));
+    allParticipants.docs.forEach((entry) => batch.delete(entry.ref));
+    allLightUsers.docs.forEach((entry) => batch.delete(entry.ref));
+    allLightRequests.docs.forEach((entry) => batch.delete(entry.ref));
+    if (currentSnap.exists()) {
+      batch.delete(CURRENT_COMPETITOR);
+    }
+    batch.set(STREAMS_REF, { streams: [] });
+  }
+
+  (data.resultEvents ?? []).forEach((entry) => {
+    const { id, ...payload } = entry;
+    batch.set(RESULT_EVENT(id), payload);
+  });
+
+  (data.resultRuns ?? []).forEach((entry) => {
+    const { id, ...payload } = entry;
+    batch.set(RESULT_RUN(id), payload);
+  });
+
+  if (data.currentCompetitor?.id) {
+    const { id, ...payload } = data.currentCompetitor;
+    batch.set(CURRENT_COMPETITOR, payload);
+  }
+
+  if (Array.isArray(data.resultStations)) {
+    data.resultStations.forEach((station) => {
+      const { id, ...payload } = station;
+      batch.set(RESULT_STATION(id), payload, { merge: true });
+    });
+  } else {
+    if (data.startStation?.id === 'start') {
+      const { id, ...payload } = data.startStation;
+      batch.set(RESULT_STATION('start'), payload, { merge: true });
+    }
+    if (data.finishStation?.id === 'finish') {
+      const { id, ...payload } = data.finishStation;
+      batch.set(RESULT_STATION('finish'), payload, { merge: true });
+    }
+  }
+
+  if (scope === 'all') {
+    (data.participants ?? []).forEach((entry) => {
+      const { id, ...payload } = entry;
+      batch.set(PARTICIPANT(id), payload);
+    });
+
+    (data.allowedResultUsers ?? []).forEach((entry) => {
+      const { id, ...payload } = entry;
+      batch.set(RESULT_ACCESS(id), payload);
+    });
+
+    (data.resultAccessRequests ?? []).forEach((entry) => {
+      const { id, ...payload } = entry;
+      batch.set(RESULT_REQUEST(id), payload);
+    });
+
+    batch.set(STREAMS_REF, {
+      streams: data.streams ?? [],
+    });
+  }
+
+  await batch.commit();
+  return {
+    courseId: parsed.course?.courseId ?? null,
+    courseLabel: parsed.course?.courseLabel ?? null,
+    scope,
+    version: archiveVersion,
+  };
 }

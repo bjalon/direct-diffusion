@@ -15,6 +15,7 @@ import LoginPage from './pages/LoginPage';
 import ParticipantsPage from './pages/ParticipantsPage';
 import LayoutsPage from './pages/LayoutsPage';
 import ResultsAuditPage from './pages/ResultsAuditPage';
+import ResultsArchivePage from './pages/ResultsArchivePage';
 import ResultsPage from './pages/ResultsPage';
 import { BUILTIN_VIRTUAL_STREAM } from './utils/virtualDisplay';
 import { subscribeResultAccess, subscribeResultAccessRequest } from './firebase/results';
@@ -335,6 +336,23 @@ function AppShell({
                 deviceRequest={deviceRequest}
               >
                 <ResultsAuditPage />
+              </RegularRoute>
+            )}
+          />
+          <Route
+            path="/results-archives"
+            element={(
+              <RegularRoute
+                user={user}
+                permissions={permissions}
+                requiredRole="administration"
+                accessRequestState={accessRequestState}
+                setAccessRequestState={setAccessRequestState}
+                onLogout={handleLogout}
+                deviceAccess={deviceAccess}
+                deviceRequest={deviceRequest}
+              >
+                <ResultsArchivePage />
               </RegularRoute>
             )}
           />
