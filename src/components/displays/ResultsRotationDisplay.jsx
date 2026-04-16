@@ -4,6 +4,15 @@ import { deriveFinishedCourses, deriveGeneralRanking } from '../../utils/results
 
 const MEDALS = ['#f5c518', '#b8c0cc', '#cd7f32'];
 
+function shuffle(values) {
+  const next = [...values];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+}
+
 export default function ResultsRotationDisplay({
   delay = 10,
   startPause = 4,
@@ -14,6 +23,7 @@ export default function ResultsRotationDisplay({
   const [currentCompetitor, setCurrentCompetitor] = useState(null);
   const [startStation, setStartStation] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [cycleOrder, setCycleOrder] = useState([]);
   const [visible, setVisible] = useState(true);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [scrollDuration, setScrollDuration] = useState(0);
@@ -89,9 +99,44 @@ export default function ResultsRotationDisplay({
   ]);
 
   const current = slides[currentIndex] ?? slides[0] ?? null;
+  const slideKeys = useMemo(() => slides.map((slide) => slide.key), [slides]);
+
+  useEffect(() => {
+    if (slideKeys.length === 0) {
+      setCycleOrder([]);
+      setCurrentIndex(0);
+      return;
+    }
+
+    setCycleOrder((prev) => {
+      const stillValid = prev.filter((key) => slideKeys.includes(key));
+      const missing = slideKeys.filter((key) => !stillValid.includes(key));
+      const nextOrder = [...stillValid, ...shuffle(missing)];
+      if (nextOrder.length === 0) {
+        return shuffle(slideKeys);
+      }
+      return nextOrder;
+    });
+  }, [slideKeys]);
+
+  useEffect(() => {
+    if (cycleOrder.length === 0) {
+      setCurrentIndex(0);
+      return;
+    }
+    setCurrentIndex((index) => Math.min(index, cycleOrder.length - 1));
+  }, [cycleOrder.length]);
+
+  const orderedSlides = useMemo(() => {
+    if (cycleOrder.length === 0) return slides;
+    const byKey = new Map(slides.map((slide) => [slide.key, slide]));
+    return cycleOrder.map((key) => byKey.get(key)).filter(Boolean);
+  }, [cycleOrder, slides]);
+
+  const currentOrdered = orderedSlides[currentIndex] ?? orderedSlides[0] ?? null;
 
   useLayoutEffect(() => {
-    if (!current || !viewportRef.current || !listRef.current) {
+    if (!currentOrdered || !viewportRef.current || !listRef.current) {
       setOverflowPx(0);
       return;
     }
@@ -99,15 +144,15 @@ export default function ResultsRotationDisplay({
     const viewportHeight = viewportRef.current.clientHeight;
     const listHeight = listRef.current.scrollHeight;
     setOverflowPx(Math.max(0, listHeight - viewportHeight));
-  }, [currentIndex, current?.key, current?.rows.length, visible]);
+  }, [currentIndex, currentOrdered?.key, currentOrdered?.rows.length, visible]);
 
   useEffect(() => {
     setScrollOffset(0);
     setScrollDuration(0);
-  }, [current?.key]);
+  }, [currentOrdered?.key]);
 
   useEffect(() => {
-    if (!current) return undefined;
+    if (!currentOrdered) return undefined;
 
     let cancelled = false;
     let fadeTimer;
@@ -115,12 +160,17 @@ export default function ResultsRotationDisplay({
     let scrollStartTimer;
 
     const advanceSlide = () => {
-      if (slides.length <= 1) return;
+      if (orderedSlides.length <= 1) return;
       if (cancelled) return;
       setVisible(false);
       fadeTimer = setTimeout(() => {
         if (cancelled) return;
-        setCurrentIndex((index) => (slides.length > 0 ? (index + 1) % slides.length : 0));
+        setCurrentIndex((index) => {
+          if (orderedSlides.length === 0) return 0;
+          if (index < orderedSlides.length - 1) return index + 1;
+          setCycleOrder(shuffle(slideKeys));
+          return 0;
+        });
         setVisible(true);
       }, 400);
     };
@@ -137,7 +187,7 @@ export default function ResultsRotationDisplay({
         advanceSlide,
         (Math.max(0, startPause) + scrollSeconds + Math.max(0, endPause)) * 1000,
       );
-    } else if (slides.length > 1) {
+    } else if (orderedSlides.length > 1) {
       advanceTimer = setTimeout(advanceSlide, Math.max(3, delay) * 1000);
     }
 
@@ -147,11 +197,7 @@ export default function ResultsRotationDisplay({
       clearTimeout(advanceTimer);
       clearTimeout(fadeTimer);
     };
-  }, [current?.key, delay, endPause, overflowPx, scrollSpeed, slides.length, startPause]);
-
-  useEffect(() => {
-    setCurrentIndex(0);
-  }, [slides.length]);
+  }, [currentOrdered?.key, delay, endPause, orderedSlides.length, overflowPx, scrollSpeed, slideKeys, startPause]);
 
   return (
     <div className="vd-root">
@@ -160,13 +206,13 @@ export default function ResultsRotationDisplay({
         style={{ opacity: visible ? 1 : 0, transition: 'opacity 0.4s ease' }}
       >
         <div className="vd-header">
-          {current?.subtitle && <span className="vd-header-sub">{current.subtitle}</span>}
-          <span className="vd-header-title">{current?.title ?? 'Résultats'}</span>
-          {current?.isCurrentCourse && <span className="vd-badge-finished">En cours</span>}
-          {slides.length > 1 && <span className="vd-pager">{currentIndex + 1}/{slides.length}</span>}
+          {currentOrdered?.subtitle && <span className="vd-header-sub">{currentOrdered.subtitle}</span>}
+          <span className="vd-header-title">{currentOrdered?.title ?? 'Résultats'}</span>
+          {currentOrdered?.isCurrentCourse && <span className="vd-badge-finished">En cours</span>}
+          {orderedSlides.length > 1 && <span className="vd-pager">{currentIndex + 1}/{orderedSlides.length}</span>}
         </div>
 
-        {!current || current.rows.length === 0 ? (
+        {!currentOrdered || currentOrdered.rows.length === 0 ? (
           <div className="vd-empty">Aucun résultat.</div>
         ) : (
           <div className="vd-list-viewport" ref={viewportRef}>
@@ -178,11 +224,11 @@ export default function ResultsRotationDisplay({
                 transition: scrollDuration > 0 ? `transform ${scrollDuration}s linear` : 'none',
               }}
             >
-              {current.rows.map((row, index) => (
+              {currentOrdered.rows.map((row, index) => (
                 <div key={row.startId ?? row.participantId} className="vd-row" style={{ '--rank-color': MEDALS[index] ?? 'var(--text)' }}>
                   <div className="vd-rank-stack">
                     <span className="vd-rank">{index + 1}</span>
-                    {current.type === 'ranking' && row.courseNumber != null && (
+                    {currentOrdered.type === 'ranking' && row.courseNumber != null && (
                       <span className="vd-course-number">C{row.courseNumber}</span>
                     )}
                   </div>
