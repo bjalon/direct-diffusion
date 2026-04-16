@@ -1,0 +1,12 @@
+add favicon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Direct Diffusion">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ff6b2c" />
+      <stop offset="100%" stop-color="#ffb020" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="#0c111b" />
+  <rect x="8" y="8" width="48" height="48" rx="13" fill="url(#bg)" />
+  <path d="M20 20h10.5c8.2 0 13.5 4.7 13.5 12s-5.3 12-13.5 12H20zm9.9 18.2c4.6 0 7.6-2.4 7.6-6.2s-3-6.2-7.6-6.2H26.7v12.4z" fill="#fff"/>
+  <path d="M24.8 44h6.7c6.9 0 11.3-4.1 11.3-10.4 0-.7-.1-1.4-.2-2.1 1.5 1.6 2.4 3.7 2.4 6.2 0 5.4-4.4 9.3-10.8 9.3h-9.4z" fill="rgba(255,255,255,.28)"/>
+</svg>

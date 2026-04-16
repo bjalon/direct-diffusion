@@ -2028,6 +2028,21 @@ html, body, #root {
   gap: 4px;
 }
 
+.results-clock-card--warn {
+  border-color: rgba(255, 183, 77, 0.5);
+  background: rgba(255, 183, 77, 0.12);
+}
+
+.results-clock-card--danger {
+  border-color: rgba(229, 57, 53, 0.82);
+  background: #e53935;
+}
+
+.results-clock-card--danger .results-clock-label,
+.results-clock-card--danger .results-clock-value {
+  color: #fff;
+}
+
 .results-clock-label {
   font-size: 11px;
   color: var(--muted);
@@ -2045,6 +2060,16 @@ html, body, #root {
 
 .results-clock-value--warn {
   color: #ffb74d;
+}
+
+.results-clock-value--danger {
+  color: #fff;
+  background: #e53935;
+  border-radius: 8px;
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .results-clock-note {

@@ -1131,9 +1131,17 @@ function ClockStatusPanel({ clockState }) {
           <div className="results-clock-label">Heure de référence</div>
           <div className="results-clock-value">{trustedNow ? formatClockTime(trustedNow) : 'Indisponible'}</div>
         </div>
-        <div className="results-clock-card">
+        <div
+          className={`results-clock-card${
+            Math.abs(clockState.driftMs) > 10000
+              ? ' results-clock-card--danger'
+              : Math.abs(clockState.driftMs) > 1000
+                ? ' results-clock-card--warn'
+                : ''
+          }`}
+        >
           <div className="results-clock-label">Décalage constaté</div>
-          <div className={`results-clock-value${Math.abs(clockState.driftMs) > 1000 ? ' results-clock-value--warn' : ''}`}>
+          <div className="results-clock-value">
             {formatDrift(clockState.driftMs)}
           </div>
         </div>
