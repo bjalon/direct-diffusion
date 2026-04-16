@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { subscribeResultRuns } from '../../firebase/results';
-import { parseTime } from '../../utils/time';
+import { subscribeResultEvents } from '../../firebase/results';
+import { deriveGeneralRanking } from '../../utils/resultsDerivation';
 
 const MEDALS = ['#f5c518', '#b8c0cc', '#cd7f32'];
 
@@ -8,20 +8,7 @@ export default function ClassementDisplay() {
   const [classement, setClassement] = useState([]);
 
   useEffect(() => {
-    return subscribeResultRuns((runs) => {
-      const finished = runs.filter((run) => run.status === 'finished' && run.durationLabel);
-      const best = {};
-      finished.forEach((run) => {
-        const t = parseTime(run.durationLabel);
-        if (!best[run.participantId] || t < parseTime(best[run.participantId].durationLabel)) {
-          best[run.participantId] = run;
-        }
-      });
-
-      setClassement(
-        Object.values(best).sort((a, b) => parseTime(a.durationLabel) - parseTime(b.durationLabel)),
-      );
-    });
+    return subscribeResultEvents((events) => setClassement(deriveGeneralRanking(events)));
   }, []);
 
   return (

@@ -13,6 +13,7 @@ import ConfigPage from './pages/ConfigPage';
 import DisplayPage from './pages/DisplayPage';
 import LoginPage from './pages/LoginPage';
 import ParticipantsPage from './pages/ParticipantsPage';
+import ResultsAuditPage from './pages/ResultsAuditPage';
 import ResultsPage from './pages/ResultsPage';
 
 function orientationToRotation(orientation) {
@@ -233,6 +234,21 @@ function AppShell({
                 onLogout={handleLogout}
               >
                 <AdminPage currentUser={user} />
+              </RegularRoute>
+            )}
+          />
+          <Route
+            path="/results-admin"
+            element={(
+              <RegularRoute
+                user={user}
+                permissions={permissions}
+                requiredRole="administration"
+                accessRequestState={accessRequestState}
+                setAccessRequestState={setAccessRequestState}
+                onLogout={handleLogout}
+              >
+                <ResultsAuditPage />
               </RegularRoute>
             )}
           />

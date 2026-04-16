@@ -6,6 +6,7 @@ const ALL_LINKS = [
   { to: '/config',       label: 'Flux',         role: null },
   { to: '/participants', label: 'Participants', role: 'participants' },
   { to: '/admin',        label: 'Admin',        role: 'administration' },
+  { to: '/results-admin', label: 'Résultats',   role: 'administration' },
 ];
 
 export default function NavBar({ user, onLogout, roles }) {

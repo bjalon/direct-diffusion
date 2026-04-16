@@ -12,6 +12,7 @@ import {
   subscribeCurrentCompetitor,
   subscribeResultAccess,
   subscribeResultAccessRequest,
+  subscribeResultEvents,
   subscribeStation,
   syncStartBuffer,
   verifyBrowserClock,
@@ -23,6 +24,7 @@ import {
   saveStartBuffer,
 } from '../utils/resultsBuffer';
 import { createLogger } from '../utils/logger';
+import { deriveFinishedCourses } from '../utils/resultsDerivation';
 
 const log = createLogger('ResultsPage');
 
@@ -39,7 +41,10 @@ export default function ResultsPage({ user, onLogout }) {
   const [stationError, setStationError] = useState('');
   const [stationDocs, setStationDocs] = useState({ start: null, finish: null });
   const [currentCompetitor, setCurrentCompetitor] = useState(null);
+  const [resultEvents, setResultEvents] = useState([]);
   const [startBuffer, setStartBuffer] = useState([]);
+  const [courseDraft, setCourseDraft] = useState('');
+  const [currentCourse, setCurrentCourse] = useState(null);
   const [actionError, setActionError] = useState('');
   const [busyAction, setBusyAction] = useState('');
 
@@ -131,6 +136,11 @@ export default function ResultsPage({ user, onLogout }) {
   }, [canStart]);
 
   useEffect(() => {
+    if (!canStart) return;
+    return subscribeResultEvents(setResultEvents);
+  }, [canStart]);
+
+  useEffect(() => {
     const unsubs = [];
     if (canStart) {
       unsubs.push(subscribeStation('start', (doc) => setStationDocs((prev) => ({ ...prev, start: doc }))));
@@ -166,6 +176,17 @@ export default function ResultsPage({ user, onLogout }) {
     }
     setStartBuffer(loadStartBuffer(runId));
   }, [currentCompetitor?.runId, currentCompetitor?.selectedByUid, actor?.uid, selectedStation]);
+
+  useEffect(() => {
+    if (selectedStation !== 'start') return;
+    if (currentCompetitor?.courseId) {
+      setCurrentCourse({
+        courseId: currentCompetitor.courseId,
+        courseLabel: currentCompetitor.courseLabel || currentCompetitor.courseId,
+      });
+      setCourseDraft(currentCompetitor.courseLabel || currentCompetitor.courseId);
+    }
+  }, [currentCompetitor?.courseId, currentCompetitor?.courseLabel, selectedStation]);
 
   useEffect(() => () => {
     if (selectedStation && actor?.uid) {
@@ -328,6 +349,7 @@ export default function ResultsPage({ user, onLogout }) {
       <StartStationView
         actor={actor}
         participants={participants}
+        resultEvents={resultEvents}
         currentCompetitor={currentCompetitor}
         startBuffer={startBuffer}
         setStartBuffer={setStartBuffer}
@@ -335,6 +357,10 @@ export default function ResultsPage({ user, onLogout }) {
         setBusyAction={setBusyAction}
         actionError={actionError}
         setActionError={setActionError}
+        courseDraft={courseDraft}
+        setCourseDraft={setCourseDraft}
+        currentCourse={currentCourse}
+        setCurrentCourse={setCurrentCourse}
         onReleaseStation={async () => {
           await releaseStation('start', actor.uid);
           setSelectedStation('');
@@ -366,6 +392,7 @@ export default function ResultsPage({ user, onLogout }) {
 function StartStationView({
   actor,
   participants,
+  resultEvents,
   currentCompetitor,
   startBuffer,
   setStartBuffer,
@@ -373,12 +400,29 @@ function StartStationView({
   setBusyAction,
   actionError,
   setActionError,
+  courseDraft,
+  setCourseDraft,
+  currentCourse,
+  setCurrentCourse,
   onReleaseStation,
   onLogout,
 }) {
   const ownsCurrent = currentCompetitor?.selectedByUid === actor.uid;
   const isArmed = ownsCurrent && currentCompetitor?.status === 'armed';
   const isRunning = currentCompetitor?.status === 'running';
+  const canChangeCourse = !currentCompetitor;
+  const [emailPopoverOpen, setEmailPopoverOpen] = useState(false);
+  const currentCourseSummary = useMemo(
+    () => (currentCourse ? deriveFinishedCourses(resultEvents).find((course) => course.courseId === currentCourse.courseId) : null),
+    [currentCourse, resultEvents],
+  );
+  const participantCounts = useMemo(
+    () => (currentCourseSummary?.runs ?? []).reduce((acc, run) => {
+      acc[run.participantId] = (acc[run.participantId] || 0) + 1;
+      return acc;
+    }, {}),
+    [currentCourseSummary],
+  );
 
   const appendStartClick = () => {
     if (!currentCompetitor?.runId) return;
@@ -392,9 +436,57 @@ function StartStationView({
     saveStartBuffer(currentCompetitor.runId, next);
   };
 
+  if (!currentCourse && !currentCompetitor) {
+    return (
+      <ResultsShell title="Poste départ" subtitle="Nommer la course avant de sélectionner un participant.">
+        <StationToolbar onReleaseStation={onReleaseStation} onLogout={onLogout} />
+        {actionError && <div className="form-error">{actionError}</div>}
+        <div className="results-course-setup-card">
+          <label className="form-label" htmlFor="course-name">Nom de la course</label>
+          <input
+            id="course-name"
+            className="form-input"
+            placeholder="Ex : Course 1"
+            value={courseDraft}
+            onChange={(e) => setCourseDraft(e.target.value)}
+            autoFocus
+          />
+          <div className="form-actions">
+            <button
+              className="btn btn-primary"
+              disabled={!courseDraft.trim()}
+              onClick={() => {
+                const label = courseDraft.trim();
+                setCurrentCourse({
+                  courseId: createCourseId(label),
+                  courseLabel: label,
+                });
+              }}
+            >
+              Valider la course
+            </button>
+          </div>
+        </div>
+      </ResultsShell>
+    );
+  }
+
   return (
-    <ResultsShell title="Poste départ" subtitle={actor.email || 'poste anonyme'}>
-      <StationToolbar onReleaseStation={onReleaseStation} onLogout={onLogout} />
+    <ResultsShell noHeader>
+      <StartStationHeader
+        email={actor.email || 'poste anonyme'}
+        courseLabel={currentCourse?.courseLabel || currentCompetitor?.courseLabel || '—'}
+        emailPopoverOpen={emailPopoverOpen}
+        onToggleEmail={() => setEmailPopoverOpen((value) => !value)}
+        onReleaseStation={onReleaseStation}
+        onChangeCourse={() => {
+          if (!canChangeCourse) return;
+          setCurrentCourse(null);
+          setCourseDraft('');
+        }}
+        onLogout={onLogout}
+        canChangeCourse={canChangeCourse}
+      />
 
       {actionError && <div className="form-error">{actionError}</div>}
 
@@ -404,22 +496,28 @@ function StartStationView({
           {participants.map((participant) => (
             <button
               key={participant.id}
-              className="results-participant-button"
-              disabled={busyAction !== ''}
+              className={`results-participant-button${participantCounts[participant.id] ? ' results-participant-button--done' : ''}`}
+              disabled={busyAction !== '' || !currentCourse}
               onClick={async () => {
                 log.info('arming competitor from start station', {
                   participantId: participant.id,
                   participantLabel: participant.label,
                   actorUid: actor.uid,
+                  course: currentCourse,
                 });
                 setBusyAction(`arm:${participant.id}`);
                 setActionError('');
                 try {
-                  const runId = createClickEntry().clickId;
+                  const seed = createClickEntry();
+                  const runId = seed.clickId;
+                  const startId = seed.clickId;
                   await armCurrentCompetitor({
                     participant,
                     actor,
                     runId,
+                    startId,
+                    courseId: currentCourse.courseId,
+                    courseLabel: currentCourse.courseLabel,
                     selectedAtClientMs: Date.now(),
                   });
                   clearStartBuffer(runId);
@@ -432,7 +530,10 @@ function StartStationView({
                 }
               }}
             >
-              {busyAction === `arm:${participant.id}` ? 'Préparation…' : participant.label}
+              <span>{busyAction === `arm:${participant.id}` ? 'Préparation…' : participant.label}</span>
+              {participantCounts[participant.id] ? (
+                <span className="results-participant-pill">{participantCounts[participant.id]}</span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -441,6 +542,7 @@ function StartStationView({
       {currentCompetitor && !ownsCurrent && (
         <div className="results-status-card">
           <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+          <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
           <p className="login-subtitle">Une course est déjà en préparation ou en cours sur ce poste.</p>
         </div>
       )}
@@ -448,6 +550,8 @@ function StartStationView({
       {isArmed && (
         <div className="results-action-card">
           <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+          <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
+          <div className="results-status-line">Start ID: <span className="admin-uid">{currentCompetitor.startId}</span></div>
           <div className="results-status-line">Départs en mémoire: {startBuffer.length}</div>
           <div className="results-action-grid">
             <button className="btn btn-primary results-big-button" onClick={appendStartClick}>
@@ -511,10 +615,50 @@ function StartStationView({
       {isRunning && (
         <div className="results-status-card">
           <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+          <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
           <p className="login-subtitle">Course en cours. En attente de l’arrivée.</p>
         </div>
       )}
     </ResultsShell>
+  );
+}
+
+function StartStationHeader({
+  email,
+  courseLabel,
+  emailPopoverOpen,
+  onToggleEmail,
+  onReleaseStation,
+  onChangeCourse,
+  onLogout,
+  canChangeCourse,
+}) {
+  return (
+    <div className="results-station-header">
+      <div className="results-station-header-main">
+        <div className="results-station-header-title">Poste départ</div>
+        <button className="results-email-chip" onClick={onToggleEmail} type="button">
+          <span className="results-email-chip-text">{email}</span>
+        </button>
+        {emailPopoverOpen && (
+          <div className="results-email-popover" onClick={onToggleEmail}>
+            {email}
+          </div>
+        )}
+      </div>
+      <div className="results-station-course">{courseLabel}</div>
+      <div className="results-toolbar">
+        <button className="btn btn-secondary btn-sm" onClick={onReleaseStation}>
+          Libérer poste
+        </button>
+        <button className="btn btn-secondary btn-sm" onClick={onChangeCourse} disabled={!canChangeCourse}>
+          Changer de course
+        </button>
+        <button className="btn btn-secondary btn-sm" onClick={onLogout}>
+          Déconnexion
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -543,6 +687,8 @@ function FinishStationView({
       {currentCompetitor && (
         <div className="results-action-card">
           <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+          <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
+          <div className="results-status-line">Start ID: <span className="admin-uid">{currentCompetitor.startId}</span></div>
           <p className="login-subtitle">Appuyez dès que le concurrent franchit l’arrivée.</p>
           <button
             className="btn btn-primary results-big-button results-big-button--success"
@@ -602,14 +748,16 @@ function StationToolbar({ onReleaseStation, onLogout }) {
   );
 }
 
-function ResultsShell({ title, subtitle, children }) {
+function ResultsShell({ title, subtitle, children, noHeader = false }) {
   return (
     <div className="results-shell">
       <div className="results-shell-card">
-        <div className="results-shell-head">
-          <h1 className="results-shell-title">{title}</h1>
-          {subtitle && <p className="results-shell-subtitle">{subtitle}</p>}
-        </div>
+        {!noHeader && (
+          <div className="results-shell-head">
+            <h1 className="results-shell-title">{title}</h1>
+            {subtitle && <p className="results-shell-subtitle">{subtitle}</p>}
+          </div>
+        )}
         {children}
       </div>
     </div>
@@ -651,4 +799,16 @@ function getErrorLabel(error) {
   if (error?.message === 'current-competitor-busy') return 'Un concurrent est déjà en cours.';
   if (error?.message === 'no-current-competitor') return 'Aucun concurrent en cours.';
   return error?.code ? `Erreur : ${error.code}` : error?.message || 'Une erreur est survenue.';
+}
+
+function slugifyCourse(value) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'course';
+}
+
+function createCourseId(label) {
+  return `${slugifyCourse(label)}-${Date.now().toString(36)}`;
 }

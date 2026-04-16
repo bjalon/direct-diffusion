@@ -74,6 +74,20 @@ export function subscribeAllowedResultUsers(onData) {
   });
 }
 
+export function subscribeResultEvents(onData) {
+  return onSnapshot(
+    query(collection(db, 'resultEvents'), orderBy('clickedAtClientMs', 'desc')),
+    (snap) => {
+      const events = snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+      log.debug('resultEvents snapshot', { count: events.length });
+      onData(events);
+    },
+    (error) => {
+      log.error('resultEvents subscription failed', error);
+    },
+  );
+}
+
 export function submitResultAccessRequest({ uid, email, providerId }) {
   const normalizedEmail = email.trim().toLowerCase();
   log.info('submitResultAccessRequest', { uid, email: normalizedEmail, providerId });
@@ -197,12 +211,23 @@ export function subscribeCurrentCompetitor(onData) {
   });
 }
 
-export async function armCurrentCompetitor({ participant, actor, runId, selectedAtClientMs }) {
+export async function armCurrentCompetitor({
+  participant,
+  actor,
+  runId,
+  startId,
+  courseId,
+  courseLabel,
+  selectedAtClientMs,
+}) {
   log.info('armCurrentCompetitor start', {
     participantId: participant.id,
     participantLabel: participant.label,
     actor,
     runId,
+    startId,
+    courseId,
+    courseLabel,
     selectedAtClientMs,
   });
   const selectedAtClientIso = new Date(selectedAtClientMs).toISOString();
@@ -215,6 +240,9 @@ export async function armCurrentCompetitor({ participant, actor, runId, selected
 
     transaction.set(CURRENT_COMPETITOR, {
       runId,
+      startId,
+      courseId,
+      courseLabel,
       participantId: participant.id,
       participantLabel: participant.label,
       status: 'armed',
@@ -228,6 +256,9 @@ export async function armCurrentCompetitor({ participant, actor, runId, selected
 
     transaction.set(RESULT_RUN(runId), {
       runId,
+      startId,
+      courseId,
+      courseLabel,
       participantId: participant.id,
       participantLabel: participant.label,
       status: 'armed',
@@ -271,15 +302,20 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
 
   const officialStart = clicks[0];
   const batch = writeBatch(db);
+  const latestStart = clicks[clicks.length - 1];
 
   clicks.forEach((click) => {
     batch.set(RESULT_EVENT(click.clickId), {
       clickId: click.clickId,
       runId: currentCompetitor.runId,
+      startId: currentCompetitor.startId,
+      courseId: currentCompetitor.courseId,
+      courseLabel: currentCompetitor.courseLabel,
       participantId: currentCompetitor.participantId,
       participantLabel: currentCompetitor.participantLabel,
       type: 'start',
       station: 'start',
+      active: true,
       actorUid: actor.uid,
       actorEmail: actor.email ?? '',
       actorProviderId: actor.providerId ?? 'anonymous',
@@ -291,11 +327,17 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
 
   batch.set(RESULT_RUN(currentCompetitor.runId), {
     status: 'running',
+    startId: currentCompetitor.startId,
+    courseId: currentCompetitor.courseId,
+    courseLabel: currentCompetitor.courseLabel,
     participantId: currentCompetitor.participantId,
     participantLabel: currentCompetitor.participantLabel,
     officialStartClickId: officialStart.clickId,
     officialStartAtClientMs: officialStart.clickedAtClientMs,
     officialStartAtClientIso: officialStart.clickedAtClientIso,
+    latestStartClickId: latestStart.clickId,
+    latestStartAtClientMs: latestStart.clickedAtClientMs,
+    latestStartAtClientIso: latestStart.clickedAtClientIso,
     startClickCount: clicks.length,
     startedByUid: actor.uid,
     startedByEmail: actor.email ?? '',
@@ -309,6 +351,9 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
     officialStartClickId: officialStart.clickId,
     officialStartAtClientMs: officialStart.clickedAtClientMs,
     officialStartAtClientIso: officialStart.clickedAtClientIso,
+    latestStartClickId: latestStart.clickId,
+    latestStartAtClientMs: latestStart.clickedAtClientMs,
+    latestStartAtClientIso: latestStart.clickedAtClientIso,
     startClickCount: clicks.length,
     startedByUid: actor.uid,
     startedByEmail: actor.email ?? '',
@@ -328,8 +373,8 @@ export async function completeCurrentCompetitor({ actor, click }) {
   }
 
   const current = currentSnap.data();
-  const durationMs = Number.isFinite(current.officialStartAtClientMs)
-    ? Math.max(0, click.clickedAtClientMs - current.officialStartAtClientMs)
+  const durationMs = Number.isFinite(current.latestStartAtClientMs)
+    ? Math.max(0, click.clickedAtClientMs - current.latestStartAtClientMs)
     : null;
 
   const durationLabel = durationMs == null ? null : formatDurationMs(durationMs);
@@ -338,10 +383,14 @@ export async function completeCurrentCompetitor({ actor, click }) {
   batch.set(RESULT_EVENT(click.clickId), {
     clickId: click.clickId,
     runId: current.runId,
+    startId: current.startId,
+    courseId: current.courseId,
+    courseLabel: current.courseLabel,
     participantId: current.participantId,
     participantLabel: current.participantLabel,
     type: 'finish',
     station: 'finish',
+    active: true,
     actorUid: actor.uid,
     actorEmail: actor.email ?? '',
     actorProviderId: actor.providerId ?? 'anonymous',
@@ -352,6 +401,9 @@ export async function completeCurrentCompetitor({ actor, click }) {
 
   batch.set(RESULT_RUN(current.runId), {
     status: 'finished',
+    startId: current.startId,
+    courseId: current.courseId,
+    courseLabel: current.courseLabel,
     participantId: current.participantId,
     participantLabel: current.participantLabel,
     finishClickId: click.clickId,
@@ -412,4 +464,12 @@ export function subscribeResultRuns(onData) {
       log.error('resultRuns subscription failed', error);
     },
   );
+}
+
+export function toggleResultEventActive(eventId, active) {
+  log.info('toggleResultEventActive', { eventId, active });
+  return updateDoc(RESULT_EVENT(eventId), {
+    active,
+    updatedAt: serverTimestamp(),
+  });
 }

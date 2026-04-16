@@ -1,41 +1,40 @@
 import { useState, useEffect } from 'react';
-import { subscribeResultRuns } from '../../firebase/results';
+import { subscribeResultEvents } from '../../firebase/results';
+import { deriveFinishedCourses } from '../../utils/resultsDerivation';
 
 /**
  * Cycles through finished runs.
  * delay: rotation interval in seconds (from stream config).
  */
 export default function CoursesTermineesDisplay({ delay = 10 }) {
-  const [runs, setRuns] = useState([]);
+  const [courses, setCourses] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [visible, setVisible] = useState(true);
 
   useEffect(() => {
-    return subscribeResultRuns((entries) => {
-      setRuns(entries.filter((entry) => entry.status === 'finished' && entry.durationLabel));
-    });
+    return subscribeResultEvents((events) => setCourses(deriveFinishedCourses(events)));
   }, []);
 
-  const currentRun = runs[currentIndex] ?? null;
+  const currentCourse = courses[currentIndex] ?? null;
 
   // Auto-advance with fade transition
   useEffect(() => {
-    if (runs.length <= 1) return;
+    if (courses.length <= 1) return;
     const ms = Math.max(3, delay) * 1000;
     const timer = setInterval(() => {
       setVisible(false);
       setTimeout(() => {
-        setCurrentIndex((i) => (i + 1) % runs.length);
+        setCurrentIndex((i) => (i + 1) % courses.length);
         setVisible(true);
       }, 400);
     }, ms);
     return () => clearInterval(timer);
-  }, [runs.length, delay]);
+  }, [courses.length, delay]);
 
   // Reset index when race list changes
   useEffect(() => {
     setCurrentIndex(0);
-  }, [runs.length]);
+  }, [courses.length]);
 
   return (
     <div className="vd-root">
@@ -45,27 +44,33 @@ export default function CoursesTermineesDisplay({ delay = 10 }) {
       >
         <div className="vd-header">
           <span className="vd-header-sub">Passage terminé</span>
-          <span className="vd-header-title">{currentRun?.participantLabel ?? '—'}</span>
-          {currentRun?.status === 'finished' && <span className="vd-badge-finished">Terminé</span>}
-          {runs.length > 1 && (
+          <span className="vd-header-title">{currentCourse?.courseLabel ?? '—'}</span>
+          {currentCourse && <span className="vd-badge-finished">Terminée</span>}
+          {courses.length > 1 && (
             <span className="vd-pager">
-              {currentIndex + 1}/{runs.length}
+              {currentIndex + 1}/{courses.length}
             </span>
           )}
         </div>
 
-        {!currentRun ? (
+        {!currentCourse ? (
           <div className="vd-empty">Aucun résultat.</div>
         ) : (
           <div className="vd-list">
-            <div className="vd-row" style={{ '--rank-color': '#f5c518' }}>
-              <span className="vd-rank">1</span>
-              <span className="vd-name">{currentRun.participantLabel}</span>
-              <span className="vd-time">{currentRun.durationLabel}</span>
-            </div>
+            {currentCourse.runs.map((run, index) => (
+              <div key={run.startId} className="vd-row" style={{ '--rank-color': rankColor(index) }}>
+                <span className="vd-rank">{index + 1}</span>
+                <span className="vd-name">{run.participantLabel}</span>
+                <span className="vd-time">{run.durationLabel}</span>
+              </div>
+            ))}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function rankColor(i) {
+  return ['#f5c518', '#b8c0cc', '#cd7f32'][i] ?? 'var(--text)';
 }
