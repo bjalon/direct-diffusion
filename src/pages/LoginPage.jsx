@@ -1,21 +1,68 @@
 import { useState } from 'react';
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { GoogleAuthProvider, signInAnonymously, signInWithPopup } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
 import { auth } from '../firebase';
+import { submitResultAccessRequest } from '../firebase/results';
+import { createLogger } from '../utils/logger';
 
 const googleProvider = new GoogleAuthProvider();
+const log = createLogger('LoginPage');
 
 export default function LoginPage() {
+  const navigate = useNavigate();
   const [status, setStatus] = useState('idle');
   const [errorMsg, setErrorMsg] = useState('');
+  const [requestEmail, setRequestEmail] = useState('');
+  const [requestStatus, setRequestStatus] = useState('idle');
+  const [requestError, setRequestError] = useState('');
 
   async function handleGoogleSignIn() {
     setStatus('sending');
     setErrorMsg('');
     try {
+      log.info('starting google popup login');
       await signInWithPopup(auth, googleProvider);
+      log.info('google popup login succeeded');
     } catch (err) {
+      log.error('google popup login failed', err);
       setStatus('error');
       setErrorMsg(getErrorLabel(err.code));
+    }
+  }
+
+  async function handleRequestAccess(e) {
+    e.preventDefault();
+    if (!requestEmail.trim()) return;
+
+    setRequestStatus('sending');
+    setRequestError('');
+    try {
+      log.info('starting lightweight access request', { email: requestEmail.trim().toLowerCase() });
+      const credential = auth.currentUser?.isAnonymous
+        ? { user: auth.currentUser }
+        : await signInAnonymously(auth);
+
+      log.info('anonymous session ready', {
+        uid: credential.user.uid,
+        isAnonymous: credential.user.isAnonymous,
+      });
+
+      await submitResultAccessRequest({
+        uid: credential.user.uid,
+        email: requestEmail.trim().toLowerCase(),
+        providerId: 'anonymous',
+      });
+
+      log.info('lightweight access request stored', {
+        uid: credential.user.uid,
+        email: requestEmail.trim().toLowerCase(),
+      });
+      setRequestStatus('sent');
+      navigate('/results');
+    } catch (err) {
+      log.error('lightweight access request failed', err);
+      setRequestStatus('error');
+      setRequestError(getErrorLabel(err.code || err.message));
     }
   }
 
@@ -26,7 +73,6 @@ export default function LoginPage() {
         <h1 className="login-title">Direct Diffusion</h1>
         <p className="login-subtitle">
           Les vues d&apos;administration, flux et participants sont accessibles via Google OAuth.
-          La saisie résultats utilise un flux séparé sur la page dédiée.
         </p>
         <button
           className="btn btn-google login-btn"
@@ -42,6 +88,30 @@ export default function LoginPage() {
           {status === 'sending' ? 'Connexion…' : 'Se connecter avec Google'}
         </button>
         {status === 'error' && <div className="form-error">{errorMsg}</div>}
+
+        <div className="login-divider"><span>ou</span></div>
+
+        <form className="login-form" onSubmit={handleRequestAccess}>
+          <p className="login-subtitle">
+            Demander un accès opérateur en saisissant simplement votre email.
+          </p>
+          <input
+            type="email"
+            className="form-input"
+            placeholder="votre@email.com"
+            value={requestEmail}
+            onChange={(e) => setRequestEmail(e.target.value)}
+            required
+          />
+          <button
+            className="btn btn-secondary login-btn"
+            type="submit"
+            disabled={requestStatus === 'sending'}
+          >
+            {requestStatus === 'sending' ? 'Envoi…' : 'Demander un accès'}
+          </button>
+          {requestError && <div className="form-error">{requestError}</div>}
+        </form>
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ import { requestAccess } from './firebase/admin';
 import { getUserRoles, saveStreams, seedStreamsIfEmpty, subscribeStreams } from './firebase/streams';
 import NavBar from './components/NavBar';
 import { buildSrcFromUrl } from './utils/iframeParser';
+import { createLogger } from './utils/logger';
 import { loadConfig, saveConfig } from './utils/storage';
 import AdminPage from './pages/AdminPage';
 import ConfigPage from './pages/ConfigPage';
@@ -37,6 +38,8 @@ function normaliseStream(raw) {
   return null;
 }
 
+const log = createLogger('App');
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [roles, setRoles] = useState(null);
@@ -46,43 +49,67 @@ export default function App() {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (nextUser) => {
+      log.info('auth state changed', {
+        uid: nextUser?.uid,
+        email: nextUser?.email,
+        isAnonymous: nextUser?.isAnonymous,
+        providers: nextUser?.providerData?.map((provider) => provider.providerId),
+      });
       setUser(nextUser ?? false);
       setAccessRequestState('idle');
-      if (!nextUser || nextUser.isAnonymous) {
-        setRoles(false);
-      }
+      setRoles(nextUser && !nextUser.isAnonymous ? null : false);
     });
     return unsub;
   }, []);
 
   useEffect(() => {
     if (!user || user === false || user.isAnonymous) {
+      log.debug('skip roles loading', {
+        hasUser: !!user,
+        isAnonymous: user?.isAnonymous,
+      });
       setRoles(false);
       return;
     }
 
     setRoles(null);
+    log.info('loading user roles', { email: user.email, uid: user.uid });
     getUserRoles(user.email)
-      .then((nextRoles) => setRoles(nextRoles ?? false))
-      .catch(() => setRoles(false));
+      .then((nextRoles) => {
+        log.info('roles loaded', { email: user.email, roles: nextRoles });
+        setRoles(nextRoles ?? false);
+      })
+      .catch((error) => {
+        log.error('roles loading failed', { email: user.email, error });
+        setRoles(false);
+      });
   }, [user]);
 
   useEffect(() => {
     if (!user || user === false || user.isAnonymous || !roles || roles === false) {
+      log.debug('skip stream subscription', {
+        hasUser: !!user,
+        isAnonymous: user?.isAnonymous,
+        roles,
+      });
       setStreams([]);
       return;
     }
 
+    log.info('subscribing streams', { email: user.email });
     const unsub = subscribeStreams(setStreams);
 
     fetch('./streams.json')
       .then((response) => (response.ok ? response.json() : []))
       .then((raw) => {
+        log.debug('streams.json loaded', { count: Array.isArray(raw) ? raw.length : 0 });
         if (!Array.isArray(raw) || raw.length === 0) return;
         const normalised = raw.map(normaliseStream).filter(Boolean);
         if (normalised.length > 0) seedStreamsIfEmpty(normalised).catch(() => {});
       })
-      .catch(() => {});
+      .catch((error) => {
+        log.warn('streams.json fetch failed', { error });
+      });
 
     return unsub;
   }, [user, roles]);
@@ -108,8 +135,14 @@ export default function App() {
 
     setLayoutSlots(nextLayoutSlots);
     saveConfig(nextLayoutSlots);
+    log.info('layout config updated', {
+      layout: nextLayoutSlots.layout,
+      slots: nextLayoutSlots.slots,
+      streamCount: nextStreams?.length,
+    });
 
     if (nextStreams !== streams && permissions?.admin_flux) {
+      log.info('saving streams to firestore', { count: nextStreams.length });
       saveStreams(nextStreams);
     }
   };
@@ -225,17 +258,25 @@ function RegularRoute({
   }
 
   if (!permissions) {
+    log.warn('regular route denied, no permissions', {
+      user: user?.email,
+      accessRequestState,
+      requiredRole,
+    });
     return (
       <DeniedAccessCard
         user={user}
         requestState={accessRequestState}
         onLogout={onLogout}
         onRequestAccess={async () => {
+          log.info('requesting google access', { email: user.email });
           setAccessRequestState('sending');
           try {
             await requestAccess(user);
+            log.info('google access request sent', { email: user.email });
             setAccessRequestState('sent');
-          } catch {
+          } catch (error) {
+            log.error('google access request failed', { email: user.email, error });
             setAccessRequestState('error');
           }
         }}
@@ -244,6 +285,11 @@ function RegularRoute({
   }
 
   if (requiredRole && !permissions[requiredRole]) {
+    log.warn('regular route missing role', {
+      email: user?.email,
+      requiredRole,
+      permissions,
+    });
     return <Navigate to="/" replace />;
   }
 

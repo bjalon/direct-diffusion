@@ -16,6 +16,9 @@ import {
   subscribeAllowedResultUsers,
   subscribePendingResultAccessRequests,
 } from '../firebase/results';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('AdminPage');
 
 const NORMAL_ROLE_LABELS = {
   administration: 'Administration',
@@ -71,6 +74,7 @@ export default function AdminPage({ currentUser }) {
     clearMessages();
     setBusyKey(`add:${email}`);
     try {
+      log.info('adding google user', { email, roles: newRoles });
       await saveAllowedUser(email, newRoles);
       setNewEmail('');
       setNewRoles(DEFAULT_NORMAL_ROLES);
@@ -95,6 +99,7 @@ export default function AdminPage({ currentUser }) {
 
     setBusyKey(`role:${email}:${role}`);
     try {
+      log.info('toggling google role', { email, role, checked });
       await saveAllowedUser(email, { ...entry, [role]: checked });
     } catch (err) {
       setError(getErrorLabel(err));
@@ -113,6 +118,7 @@ export default function AdminPage({ currentUser }) {
 
     setBusyKey(`delete:${email}`);
     try {
+      log.info('deleting google user', { email });
       await deleteAllowedUser(email);
       setFeedback(`Accès supprimé pour ${email}.`);
     } catch (err) {
@@ -126,6 +132,7 @@ export default function AdminPage({ currentUser }) {
     clearMessages();
     setBusyKey(`approve:${email}`);
     try {
+      log.info('approving google access request', { email });
       await approveAccessRequest(email, DEFAULT_NORMAL_ROLES);
       setFeedback(`Demande Google approuvée pour ${email}.`);
     } catch (err) {
@@ -139,6 +146,7 @@ export default function AdminPage({ currentUser }) {
     clearMessages();
     setBusyKey(`reject:${email}`);
     try {
+      log.info('rejecting google access request', { email });
       await rejectAccessRequest(email);
       setFeedback(`Demande Google refusée pour ${email}.`);
     } catch (err) {
@@ -152,6 +160,7 @@ export default function AdminPage({ currentUser }) {
     clearMessages();
     setBusyKey(`result-approve:${uid}`);
     try {
+      log.info('approving results access request', { uid });
       await approveResultAccessRequest(uid);
       setFeedback(`Demande résultats approuvée pour ${uid}.`);
     } catch (err) {
@@ -165,6 +174,7 @@ export default function AdminPage({ currentUser }) {
     clearMessages();
     setBusyKey(`result-reject:${uid}`);
     try {
+      log.info('rejecting results access request', { uid });
       await rejectResultAccessRequest(uid);
       setFeedback(`Demande résultats refusée pour ${uid}.`);
     } catch (err) {
@@ -181,6 +191,7 @@ export default function AdminPage({ currentUser }) {
 
     setBusyKey(`result-role:${uid}:${role}`);
     try {
+      log.info('toggling result role', { uid, role, checked });
       await saveAllowedResultUser(uid, { ...entry, [role]: checked });
       setFeedback(`Droits résultats mis à jour pour ${entry.email || uid}.`);
     } catch (err) {
@@ -194,6 +205,7 @@ export default function AdminPage({ currentUser }) {
     clearMessages();
     setBusyKey(`result-delete:${uid}`);
     try {
+      log.info('deleting result operator', { uid });
       await deleteAllowedResultUser(uid);
       setFeedback(`Accès résultats supprimé pour ${uid}.`);
     } catch (err) {

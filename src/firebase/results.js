@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatDurationMs } from '../utils/resultsBuffer';
+import { createLogger } from '../utils/logger';
 
 const RESULT_ACCESS = (uid) => doc(db, 'allowedResultUsers', uid);
 const RESULT_REQUEST = (uid) => doc(db, 'resultAccessRequests', uid);
@@ -22,6 +23,7 @@ const CURRENT_COMPETITOR = doc(db, 'currentCompetitor', 'current');
 const RESULT_EVENT = (eventId) => doc(db, 'resultEvents', eventId);
 const RESULT_RUN = (runId) => doc(db, 'resultRuns', runId);
 const CLOCK_CHECK = (uid) => doc(db, 'clockChecks', uid);
+const log = createLogger('firebase/results');
 
 export function subscribeResultAccess(uid, onData) {
   if (!uid) {
@@ -30,7 +32,11 @@ export function subscribeResultAccess(uid, onData) {
   }
 
   return onSnapshot(RESULT_ACCESS(uid), (snap) => {
-    onData(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+    const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+    log.debug('result access snapshot', { uid, data });
+    onData(data);
+  }, (error) => {
+    log.error('result access subscription failed', { uid, error });
   });
 }
 
@@ -41,7 +47,11 @@ export function subscribeResultAccessRequest(uid, onData) {
   }
 
   return onSnapshot(RESULT_REQUEST(uid), (snap) => {
-    onData(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+    const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+    log.debug('result access request snapshot', { uid, data });
+    onData(data);
+  }, (error) => {
+    log.error('result access request subscription failed', { uid, error });
   });
 }
 
@@ -66,6 +76,7 @@ export function subscribeAllowedResultUsers(onData) {
 
 export function submitResultAccessRequest({ uid, email, providerId }) {
   const normalizedEmail = email.trim().toLowerCase();
+  log.info('submitResultAccessRequest', { uid, email: normalizedEmail, providerId });
   return setDoc(
     RESULT_REQUEST(uid),
     {
@@ -81,6 +92,7 @@ export function submitResultAccessRequest({ uid, email, providerId }) {
 }
 
 export function approveResultAccessRequest(uid) {
+  log.info('approveResultAccessRequest', { uid });
   return getDoc(RESULT_REQUEST(uid)).then((snap) => {
     const request = snap.exists() ? snap.data() : {};
     return setDoc(
@@ -103,6 +115,7 @@ export function approveResultAccessRequest(uid) {
 }
 
 export function rejectResultAccessRequest(uid) {
+  log.info('rejectResultAccessRequest', { uid });
   return updateDoc(RESULT_REQUEST(uid), {
     status: 'rejected',
     reviewedAt: serverTimestamp(),
@@ -111,6 +124,7 @@ export function rejectResultAccessRequest(uid) {
 }
 
 export function saveAllowedResultUser(uid, data) {
+  log.info('saveAllowedResultUser', { uid, data });
   return setDoc(
     RESULT_ACCESS(uid),
     {
@@ -125,16 +139,22 @@ export function saveAllowedResultUser(uid, data) {
 }
 
 export function deleteAllowedResultUser(uid) {
+  log.info('deleteAllowedResultUser', { uid });
   return deleteDoc(RESULT_ACCESS(uid));
 }
 
 export function subscribeStation(station, onData) {
   return onSnapshot(RESULT_STATION(station), (snap) => {
-    onData(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+    const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+    log.debug('station snapshot', { station, data });
+    onData(data);
+  }, (error) => {
+    log.error('station subscription failed', { station, error });
   });
 }
 
 export async function claimStation(station, actor) {
+  log.info('claimStation start', { station, actor });
   await runTransaction(db, async (transaction) => {
     const ref = RESULT_STATION(station);
     const snap = await transaction.get(ref);
@@ -157,6 +177,7 @@ export async function claimStation(station, actor) {
 }
 
 export async function releaseStation(station, uid) {
+  log.info('releaseStation start', { station, uid });
   await runTransaction(db, async (transaction) => {
     const ref = RESULT_STATION(station);
     const snap = await transaction.get(ref);
@@ -168,11 +189,22 @@ export async function releaseStation(station, uid) {
 
 export function subscribeCurrentCompetitor(onData) {
   return onSnapshot(CURRENT_COMPETITOR, (snap) => {
-    onData(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+    const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+    log.debug('current competitor snapshot', data);
+    onData(data);
+  }, (error) => {
+    log.error('current competitor subscription failed', error);
   });
 }
 
 export async function armCurrentCompetitor({ participant, actor, runId, selectedAtClientMs }) {
+  log.info('armCurrentCompetitor start', {
+    participantId: participant.id,
+    participantLabel: participant.label,
+    actor,
+    runId,
+    selectedAtClientMs,
+  });
   const selectedAtClientIso = new Date(selectedAtClientMs).toISOString();
 
   await runTransaction(db, async (transaction) => {
@@ -210,6 +242,7 @@ export async function armCurrentCompetitor({ participant, actor, runId, selected
 }
 
 export async function cancelCurrentCompetitor(runId, uid) {
+  log.info('cancelCurrentCompetitor start', { runId, uid });
   await runTransaction(db, async (transaction) => {
     const snap = await transaction.get(CURRENT_COMPETITOR);
     if (!snap.exists()) return;
@@ -230,6 +263,11 @@ export async function cancelCurrentCompetitor(runId, uid) {
 
 export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
   if (!currentCompetitor?.runId || clicks.length === 0) return null;
+  log.info('syncStartBuffer start', {
+    runId: currentCompetitor?.runId,
+    clickCount: clicks.length,
+    actor,
+  });
 
   const officialStart = clicks[0];
   const batch = writeBatch(db);
@@ -283,6 +321,7 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
 }
 
 export async function completeCurrentCompetitor({ actor, click }) {
+  log.info('completeCurrentCompetitor start', { actor, click });
   const currentSnap = await getDoc(CURRENT_COMPETITOR);
   if (!currentSnap.exists()) {
     throw new Error('no-current-competitor');
@@ -339,6 +378,7 @@ export async function completeCurrentCompetitor({ actor, click }) {
 }
 
 export async function verifyBrowserClock(uid) {
+  log.info('verifyBrowserClock start', { uid });
   const startedAt = Date.now();
   await setDoc(CLOCK_CHECK(uid), {
     uid,
@@ -363,6 +403,13 @@ export async function verifyBrowserClock(uid) {
 export function subscribeResultRuns(onData) {
   return onSnapshot(
     query(collection(db, 'resultRuns'), orderBy('updatedAt', 'desc')),
-    (snap) => onData(snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }))),
+    (snap) => {
+      const runs = snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+      log.debug('resultRuns snapshot', { count: runs.length });
+      onData(runs);
+    },
+    (error) => {
+      log.error('resultRuns subscription failed', error);
+    },
   );
 }

@@ -22,6 +22,9 @@ import {
   loadStartBuffer,
   saveStartBuffer,
 } from '../utils/resultsBuffer';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('ResultsPage');
 
 export default function ResultsPage({ user, onLogout }) {
   const [signInState, setSignInState] = useState('idle');
@@ -42,10 +45,18 @@ export default function ResultsPage({ user, onLogout }) {
 
   useEffect(() => {
     if (user !== false || signInState === 'signing-in') return;
+    log.info('starting anonymous sign-in for results page');
     setSignInState('signing-in');
     signInAnonymously(auth)
-      .then(() => setSignInState('done'))
+      .then((credential) => {
+        log.info('anonymous sign-in succeeded', {
+          uid: credential.user.uid,
+          isAnonymous: credential.user.isAnonymous,
+        });
+        setSignInState('done');
+      })
       .catch((error) => {
+        log.error('anonymous sign-in failed', error);
         setSignInState('error');
         setActionError(getErrorLabel(error));
       });
@@ -54,9 +65,11 @@ export default function ResultsPage({ user, onLogout }) {
   useEffect(() => {
     if (!user || user === false) return;
 
+    log.info('starting browser clock verification', { uid: user.uid });
     setClockState({ status: 'checking', driftMs: 0, error: '' });
     verifyBrowserClock(user.uid)
       .then(({ driftMs }) => {
+        log.info('browser clock verification completed', { uid: user.uid, driftMs });
         if (Math.abs(driftMs) > 1000) {
           setClockState({ status: 'invalid', driftMs, error: '' });
         } else {
@@ -64,6 +77,7 @@ export default function ResultsPage({ user, onLogout }) {
         }
       })
       .catch((error) => {
+        log.error('browser clock verification failed', error);
         setClockState({ status: 'error', driftMs: 0, error: getErrorLabel(error) });
       });
   }, [user?.uid]);
@@ -95,6 +109,10 @@ export default function ResultsPage({ user, onLogout }) {
 
   useEffect(() => {
     if (!hasResultAccess) {
+      log.debug('results access not granted yet', {
+        request: resultRequest,
+        access: resultAccess,
+      });
       setSelectedStation('');
       return;
     }
@@ -125,11 +143,16 @@ export default function ResultsPage({ user, onLogout }) {
 
   useEffect(() => {
     if (!selectedStation || !actor || !hasResultAccess) return;
+    log.info('claiming station from results page', { station: selectedStation, actor });
     setStationState('claiming');
     setStationError('');
     claimStation(selectedStation, actor)
-      .then(() => setStationState('claimed'))
+      .then(() => {
+        log.info('station claimed', { station: selectedStation, actorUid: actor.uid });
+        setStationState('claimed');
+      })
       .catch((error) => {
+        log.error('station claim failed', { station: selectedStation, error });
         setStationState('error');
         setStationError(getErrorLabel(error));
       });
@@ -183,6 +206,7 @@ export default function ResultsPage({ user, onLogout }) {
   if (!hasResultAccess) {
     const pendingLike = resultRequest || resultAccess;
     if (pendingLike) {
+      log.info('rendering pending result access screen', pendingLike);
       return (
         <ResultsShell title="Demande en attente" subtitle="Votre demande d’accès résultats a bien été enregistrée.">
           <div className="results-status-card">
@@ -205,6 +229,10 @@ export default function ResultsPage({ user, onLogout }) {
           onSubmit={async (e) => {
             e.preventDefault();
             if (!requestEmail.trim()) return;
+            log.info('submitting result access request from results page', {
+              uid: user.uid,
+              email: requestEmail.trim().toLowerCase(),
+            });
             setSubmitState('sending');
             setActionError('');
             try {
@@ -213,8 +241,13 @@ export default function ResultsPage({ user, onLogout }) {
                 email: requestEmail,
                 providerId: primaryProvider(user),
               });
+              log.info('result access request submitted', {
+                uid: user.uid,
+                email: requestEmail.trim().toLowerCase(),
+              });
               setSubmitState('sent');
             } catch (error) {
+              log.error('result access request submission failed', error);
               setSubmitState('error');
               setActionError(getErrorLabel(error));
             }
@@ -350,6 +383,11 @@ function StartStationView({
   const appendStartClick = () => {
     if (!currentCompetitor?.runId) return;
     const next = [...startBuffer, createClickEntry()];
+    log.info('local start click buffered', {
+      runId: currentCompetitor.runId,
+      bufferSize: next.length,
+      lastClick: next[next.length - 1],
+    });
     setStartBuffer(next);
     saveStartBuffer(currentCompetitor.runId, next);
   };
@@ -369,6 +407,11 @@ function StartStationView({
               className="results-participant-button"
               disabled={busyAction !== ''}
               onClick={async () => {
+                log.info('arming competitor from start station', {
+                  participantId: participant.id,
+                  participantLabel: participant.label,
+                  actorUid: actor.uid,
+                });
                 setBusyAction(`arm:${participant.id}`);
                 setActionError('');
                 try {
@@ -382,6 +425,7 @@ function StartStationView({
                   clearStartBuffer(runId);
                   setStartBuffer([]);
                 } catch (error) {
+                  log.error('arming competitor failed', error);
                   setActionError(getErrorLabel(error));
                 } finally {
                   setBusyAction('');
@@ -413,6 +457,10 @@ function StartStationView({
               className="btn btn-danger results-big-button"
               disabled={busyAction === 'cancel'}
               onClick={async () => {
+                log.info('cancelling current competitor from start station', {
+                  runId: currentCompetitor.runId,
+                  actorUid: actor.uid,
+                });
                 setBusyAction('cancel');
                 setActionError('');
                 try {
@@ -420,6 +468,7 @@ function StartStationView({
                   clearStartBuffer(currentCompetitor.runId);
                   setStartBuffer([]);
                 } catch (error) {
+                  log.error('cancel current competitor failed', error);
                   setActionError(getErrorLabel(error));
                 } finally {
                   setBusyAction('');
@@ -434,6 +483,11 @@ function StartStationView({
               className="btn btn-secondary results-next-button"
               disabled={busyAction === 'sync'}
               onClick={async () => {
+                log.info('syncing local start buffer', {
+                  runId: currentCompetitor.runId,
+                  clickCount: startBuffer.length,
+                  actorUid: actor.uid,
+                });
                 setBusyAction('sync');
                 setActionError('');
                 try {
@@ -441,6 +495,7 @@ function StartStationView({
                   clearStartBuffer(currentCompetitor.runId);
                   setStartBuffer([]);
                 } catch (error) {
+                  log.error('sync start buffer failed', error);
                   setActionError(getErrorLabel(error));
                 } finally {
                   setBusyAction('');
@@ -493,6 +548,10 @@ function FinishStationView({
             className="btn btn-primary results-big-button results-big-button--success"
             disabled={busyAction === 'finish'}
             onClick={async () => {
+              log.info('finish click triggered', {
+                runId: currentCompetitor?.runId,
+                actorUid: actor.uid,
+              });
               setBusyAction('finish');
               setActionError('');
               try {
@@ -501,6 +560,7 @@ function FinishStationView({
                   click: createClickEntry(),
                 });
               } catch (error) {
+                log.error('finish click failed', error);
                 setActionError(getErrorLabel(error));
               } finally {
                 setBusyAction('');
