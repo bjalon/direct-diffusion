@@ -7,6 +7,7 @@ import {
   cancelCurrentCompetitor,
   claimStation,
   completeCurrentCompetitor,
+  mirrorPendingStartClicks,
   releaseStation,
   submitResultAccessRequest,
   subscribeCurrentCompetitor,
@@ -424,7 +425,7 @@ function StartStationView({
     [currentCourseSummary],
   );
 
-  const appendStartClick = () => {
+  const appendStartClick = async () => {
     if (!currentCompetitor?.runId) return;
     const next = [...startBuffer, createClickEntry()];
     log.info('local start click buffered', {
@@ -434,6 +435,12 @@ function StartStationView({
     });
     setStartBuffer(next);
     saveStartBuffer(currentCompetitor.runId, next);
+    try {
+      await mirrorPendingStartClicks({ currentCompetitor, clicks: next, actor });
+    } catch (error) {
+      log.error('mirror pending start clicks failed', error);
+      setActionError(getErrorLabel(error));
+    }
   };
 
   if (!currentCourse && !currentCompetitor) {

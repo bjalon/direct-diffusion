@@ -339,6 +339,7 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
     latestStartAtClientMs: latestStart.clickedAtClientMs,
     latestStartAtClientIso: latestStart.clickedAtClientIso,
     startClickCount: clicks.length,
+    pendingStartClicks: [],
     startedByUid: actor.uid,
     startedByEmail: actor.email ?? '',
     startedAtServer: serverTimestamp(),
@@ -355,6 +356,7 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
     latestStartAtClientMs: latestStart.clickedAtClientMs,
     latestStartAtClientIso: latestStart.clickedAtClientIso,
     startClickCount: clicks.length,
+    pendingStartClicks: [],
     startedByUid: actor.uid,
     startedByEmail: actor.email ?? '',
     startedAtServer: serverTimestamp(),
@@ -365,6 +367,32 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
   return officialStart;
 }
 
+export async function mirrorPendingStartClicks({ currentCompetitor, clicks, actor }) {
+  if (!currentCompetitor?.runId) return;
+  const latestStart = clicks[clicks.length - 1] ?? null;
+
+  log.info('mirrorPendingStartClicks', {
+    runId: currentCompetitor.runId,
+    clickCount: clicks.length,
+    latestStart,
+    actor,
+  });
+
+  const payload = {
+    pendingStartClicks: clicks,
+    latestStartClickId: latestStart?.clickId ?? null,
+    latestStartAtClientMs: latestStart?.clickedAtClientMs ?? null,
+    latestStartAtClientIso: latestStart?.clickedAtClientIso ?? null,
+    startClickCount: clicks.length,
+    updatedAt: serverTimestamp(),
+  };
+
+  const batch = writeBatch(db);
+  batch.set(CURRENT_COMPETITOR, payload, { merge: true });
+  batch.set(RESULT_RUN(currentCompetitor.runId), payload, { merge: true });
+  await batch.commit();
+}
+
 export async function completeCurrentCompetitor({ actor, click }) {
   log.info('completeCurrentCompetitor start', { actor, click });
   const currentSnap = await getDoc(CURRENT_COMPETITOR);
@@ -373,12 +401,46 @@ export async function completeCurrentCompetitor({ actor, click }) {
   }
 
   const current = currentSnap.data();
-  const durationMs = Number.isFinite(current.latestStartAtClientMs)
-    ? Math.max(0, click.clickedAtClientMs - current.latestStartAtClientMs)
+  const pendingStartClicks = Array.isArray(current.pendingStartClicks) ? current.pendingStartClicks : [];
+  const latestPendingStart = pendingStartClicks[pendingStartClicks.length - 1] ?? null;
+
+  if (!latestPendingStart && !Number.isFinite(current.latestStartAtClientMs)) {
+    throw new Error('no-start-click');
+  }
+
+  const startReference = latestPendingStart ?? {
+    clickId: current.latestStartClickId,
+    clickedAtClientMs: current.latestStartAtClientMs,
+    clickedAtClientIso: current.latestStartAtClientIso,
+  };
+
+  const durationMs = Number.isFinite(startReference.clickedAtClientMs)
+    ? Math.max(0, click.clickedAtClientMs - startReference.clickedAtClientMs)
     : null;
 
   const durationLabel = durationMs == null ? null : formatDurationMs(durationMs);
   const batch = writeBatch(db);
+
+  pendingStartClicks.forEach((startClick) => {
+    batch.set(RESULT_EVENT(startClick.clickId), {
+      clickId: startClick.clickId,
+      runId: current.runId,
+      startId: current.startId,
+      courseId: current.courseId,
+      courseLabel: current.courseLabel,
+      participantId: current.participantId,
+      participantLabel: current.participantLabel,
+      type: 'start',
+      station: 'start',
+      active: true,
+      actorUid: current.startedByUid || current.selectedByUid,
+      actorEmail: current.startedByEmail || current.selectedByEmail || '',
+      actorProviderId: actor.providerId ?? 'anonymous',
+      clickedAtClientMs: startClick.clickedAtClientMs,
+      clickedAtClientIso: startClick.clickedAtClientIso,
+      syncedAtServer: serverTimestamp(),
+    }, { merge: true });
+  });
 
   batch.set(RESULT_EVENT(click.clickId), {
     clickId: click.clickId,
@@ -406,6 +468,12 @@ export async function completeCurrentCompetitor({ actor, click }) {
     courseLabel: current.courseLabel,
     participantId: current.participantId,
     participantLabel: current.participantLabel,
+    officialStartClickId: current.officialStartClickId || startReference.clickId,
+    officialStartAtClientMs: current.officialStartAtClientMs || startReference.clickedAtClientMs,
+    officialStartAtClientIso: current.officialStartAtClientIso || startReference.clickedAtClientIso,
+    latestStartClickId: startReference.clickId,
+    latestStartAtClientMs: startReference.clickedAtClientMs,
+    latestStartAtClientIso: startReference.clickedAtClientIso,
     finishClickId: click.clickId,
     finishAtClientMs: click.clickedAtClientMs,
     finishAtClientIso: click.clickedAtClientIso,
@@ -414,6 +482,7 @@ export async function completeCurrentCompetitor({ actor, click }) {
     finishedAtServer: serverTimestamp(),
     durationMs,
     durationLabel,
+    pendingStartClicks: [],
     updatedAt: serverTimestamp(),
   }, { merge: true });
 
