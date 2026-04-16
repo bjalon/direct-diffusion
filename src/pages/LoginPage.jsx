@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { GoogleAuthProvider, signInAnonymously, signInWithPopup } from 'firebase/auth';
 import { auth } from '../firebase';
 import { submitResultAccessRequest } from '../firebase/results';
@@ -8,6 +9,7 @@ const googleProvider = new GoogleAuthProvider();
 const log = createLogger('LoginPage');
 
 export default function LoginPage({ user, deviceAccess, deviceRequest }) {
+  const navigate = useNavigate();
   const [status, setStatus] = useState('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [requestEmail, setRequestEmail] = useState('');
@@ -63,7 +65,8 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
     }
   }
 
-  const waitingEntry = deviceRequest || (deviceAccess && !deviceAccess.tv ? deviceAccess : null);
+  const hasApprovedLightAccess = !!deviceAccess;
+  const waitingEntry = !hasApprovedLightAccess && deviceRequest?.status === 'pending' ? deviceRequest : null;
   if (user?.isAnonymous && waitingEntry) {
     return (
       <div className="login-page">
@@ -77,6 +80,27 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
             <div className="results-status-line"><strong>Email:</strong> {waitingEntry.email || '—'}</div>
             <div className="results-status-line"><strong>UID:</strong> {user.uid}</div>
             <div className="results-status-line"><strong>Statut:</strong> {statusLabel(waitingEntry.status)}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (user?.isAnonymous && deviceAccess?.tv) {
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <div className="login-logo" aria-hidden>DD</div>
+          <h1 className="login-title">Accès TV actif</h1>
+          <p className="login-subtitle">
+            Ce compte léger peut accéder à l&apos;affichage, aux flux et aux layouts.
+          </p>
+          <div className="results-status-card">
+            <div className="results-status-line"><strong>Email:</strong> {deviceAccess.email || '—'}</div>
+            <div className="results-status-line"><strong>UID:</strong> {user.uid}</div>
+            <button className="btn btn-primary login-btn" onClick={() => navigate('/')}>
+              Aller sur Affichage
+            </button>
           </div>
         </div>
       </div>

@@ -251,6 +251,7 @@ export default function AdminPage({ currentUser }) {
     }
   };
 
+
   return (
     <div className="config-page">
       <section className="config-section">
@@ -519,6 +520,7 @@ export default function AdminPage({ currentUser }) {
           </div>
         )}
       </section>
+
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { signInAnonymously } from 'firebase/auth';
 import { auth } from '../firebase';
 import { subscribeParticipants } from '../firebase/participants';
@@ -32,8 +33,15 @@ import { deriveFinishedCourses } from '../utils/resultsDerivation';
 const log = createLogger('ResultsPage');
 
 export default function ResultsPage({ user, onLogout }) {
+  const navigate = useNavigate();
   const [signInState, setSignInState] = useState('idle');
-  const [clockState, setClockState] = useState({ status: 'pending', driftMs: 0, error: '' });
+  const [clockState, setClockState] = useState({
+    status: 'pending',
+    driftMs: 0,
+    error: '',
+    serverNow: null,
+    measuredAtClientMs: null,
+  });
   const [requestEmail, setRequestEmail] = useState('');
   const [submitState, setSubmitState] = useState('idle');
   const [resultAccess, setResultAccess] = useState(null);
@@ -50,6 +58,8 @@ export default function ResultsPage({ user, onLogout }) {
   const [currentCourse, setCurrentCourse] = useState(null);
   const [actionError, setActionError] = useState('');
   const [busyAction, setBusyAction] = useState('');
+  const [depossessionNotice, setDepossessionNotice] = useState('');
+  const [hadSelectedStationOwnership, setHadSelectedStationOwnership] = useState(false);
 
   useEffect(() => {
     if (user !== false || signInState === 'signing-in') return;
@@ -74,19 +84,34 @@ export default function ResultsPage({ user, onLogout }) {
     if (!user || user === false) return;
 
     log.info('starting browser clock verification', { uid: user.uid });
-    setClockState({ status: 'checking', driftMs: 0, error: '' });
+    setClockState({
+      status: 'checking',
+      driftMs: 0,
+      error: '',
+      serverNow: null,
+      measuredAtClientMs: null,
+    });
     verifyBrowserClock(user.uid)
-      .then(({ driftMs }) => {
+      .then(({ driftMs, serverNow }) => {
+        const measuredAtClientMs = Date.now();
         log.info('browser clock verification completed', { uid: user.uid, driftMs });
-        if (Math.abs(driftMs) > 1000) {
-          setClockState({ status: 'invalid', driftMs, error: '' });
-        } else {
-          setClockState({ status: 'valid', driftMs, error: '' });
-        }
+        setClockState({
+          status: Math.abs(driftMs) > 1000 ? 'invalid' : 'valid',
+          driftMs,
+          error: '',
+          serverNow,
+          measuredAtClientMs,
+        });
       })
       .catch((error) => {
         log.error('browser clock verification failed', error);
-        setClockState({ status: 'error', driftMs: 0, error: getErrorLabel(error) });
+        setClockState({
+          status: 'unavailable',
+          driftMs: 0,
+          error: getErrorLabel(error),
+          serverNow: null,
+          measuredAtClientMs: null,
+        });
       });
   }, [user?.uid]);
 
@@ -124,9 +149,7 @@ export default function ResultsPage({ user, onLogout }) {
       setSelectedStation('');
       return;
     }
-    if (canStart && !canFinish) setSelectedStation('start');
-    if (canFinish && !canStart) setSelectedStation('finish');
-  }, [canStart, canFinish, hasResultAccess]);
+  }, [hasResultAccess, resultRequest, resultAccess]);
 
   useEffect(() => {
     if (!hasResultAccess) return;
@@ -214,6 +237,33 @@ export default function ResultsPage({ user, onLogout }) {
     }
   }, [selectedStation, actor?.uid]);
 
+  useEffect(() => {
+    if (!selectedStation || !actor?.uid) return;
+    const stationDoc = selectedStation === 'start' ? stationDocs.start : stationDocs.finish;
+    if (stationDoc?.assignedUid === actor.uid) {
+      setHadSelectedStationOwnership(true);
+    }
+  }, [selectedStation, stationDocs.start?.assignedUid, stationDocs.finish?.assignedUid, actor?.uid]);
+
+  useEffect(() => {
+    if (!selectedStation || !actor?.uid || !hadSelectedStationOwnership) return;
+    const stationDoc = selectedStation === 'start' ? stationDocs.start : stationDocs.finish;
+    const stationLabel = selectedStation === 'start' ? 'départ' : 'arrivée';
+
+    if (!stationDoc) {
+      setDepossessionNotice(`Vous avez été dépossédé du poste ${stationLabel}. Les actions sont désormais bloquées tant que vous ne reprenez pas ce poste.`);
+      return;
+    }
+
+    if (!stationDoc.assignedUid || stationDoc.assignedUid !== actor.uid) {
+      setDepossessionNotice(`Vous avez été dépossédé du poste ${stationLabel}. Les actions sont désormais bloquées tant que vous ne reprenez pas ce poste.`);
+    }
+  }, [selectedStation, stationDocs.start?.assignedUid, stationDocs.finish?.assignedUid, actor?.uid, hadSelectedStationOwnership]);
+
+  useEffect(() => {
+    setHadSelectedStationOwnership(false);
+  }, [selectedStation]);
+
   if (user === false || signInState === 'signing-in') {
     return <ResultsLoadingCard label="Connexion anonyme du poste résultats…" />;
   }
@@ -230,20 +280,6 @@ export default function ResultsPage({ user, onLogout }) {
     return <ResultsLoadingCard label="Vérification de l’horloge du navigateur…" />;
   }
 
-  if (clockState.status === 'invalid') {
-    return (
-      <ResultsErrorCard
-        title="Horloge locale incorrecte"
-        message={`L’horloge du navigateur dérive de ${Math.abs(clockState.driftMs)} ms. Mettez l’heure du poste à jour avant de poursuivre.`}
-        onLogout={onLogout}
-      />
-    );
-  }
-
-  if (clockState.status === 'error') {
-    return <ResultsErrorCard title="Vérification impossible" message={clockState.error} onLogout={onLogout} />;
-  }
-
   if (!hasResultAccess) {
     if (resultAccess?.tv) {
       return (
@@ -251,6 +287,16 @@ export default function ResultsPage({ user, onLogout }) {
           title="Accès TV uniquement"
           message="Ce compte léger peut accéder à l’affichage, aux flux et aux layouts, mais pas à la saisie résultats."
           onLogout={onLogout}
+          actions={(
+            <>
+              <button className="btn btn-primary login-btn" onClick={() => navigate('/')}>
+                Aller sur Affichage
+              </button>
+              <button className="btn btn-secondary login-btn" onClick={onLogout}>
+                Se déconnecter
+              </button>
+            </>
+          )}
         />
       );
     }
@@ -325,29 +371,44 @@ export default function ResultsPage({ user, onLogout }) {
     );
   }
 
+  const handleDepossessionConfirm = () => {
+    setDepossessionNotice('');
+    setSelectedStation('');
+    setStationState('idle');
+    setHadSelectedStationOwnership(false);
+  };
+
   if (!selectedStation) {
     return (
-      <ResultsShell title="Choix du poste" subtitle="Sélectionnez le poste que vous allez tenir.">
-        <div className="results-station-grid">
-          {canStart && (
-            <StationChoiceCard
-              station="start"
-              doc={stationDocs.start}
-              actorUid={actor?.uid}
-              onSelect={() => setSelectedStation('start')}
-            />
-          )}
-          {canFinish && (
-            <StationChoiceCard
-              station="finish"
-              doc={stationDocs.finish}
-              actorUid={actor?.uid}
-              onSelect={() => setSelectedStation('finish')}
-            />
-          )}
-        </div>
-        <button className="btn btn-secondary login-btn" onClick={onLogout}>Se déconnecter</button>
-      </ResultsShell>
+      <>
+        <ResultsShell
+          title="Choix du poste"
+          titleAside={actor?.email || 'poste anonyme'}
+          subtitle="Sélectionnez le poste que vous allez tenir."
+        >
+          <div className="results-station-grid">
+            {canStart && (
+              <StationChoiceCard
+                station="start"
+                doc={stationDocs.start}
+                actorUid={actor?.uid}
+                onSelect={() => setSelectedStation('start')}
+              />
+            )}
+            {canFinish && (
+              <StationChoiceCard
+                station="finish"
+                doc={stationDocs.finish}
+                actorUid={actor?.uid}
+                onSelect={() => setSelectedStation('finish')}
+              />
+            )}
+          </div>
+          <button className="btn btn-secondary login-btn" onClick={onLogout}>Se déconnecter</button>
+          <ClockStatusPanel clockState={clockState} />
+        </ResultsShell>
+        <ResultsNoticeDialog message={depossessionNotice} onConfirm={handleDepossessionConfirm} />
+      </>
     );
   }
 
@@ -376,51 +437,62 @@ export default function ResultsPage({ user, onLogout }) {
 
   if (selectedStation === 'start') {
     return (
-      <StartStationView
-        actor={actor}
-        participants={participants}
-        resultEvents={resultEvents}
-        currentCompetitor={currentCompetitor}
-        startBuffer={startBuffer}
-        setStartBuffer={setStartBuffer}
-        busyAction={busyAction}
-        setBusyAction={setBusyAction}
-        actionError={actionError}
-        setActionError={setActionError}
-        courseDraft={courseDraft}
-        setCourseDraft={setCourseDraft}
-        currentCourse={currentCourse}
-        setCurrentCourse={setCurrentCourse}
-        onReleaseStation={async () => {
-          await releaseStation('start', actor.uid);
-          setSelectedStation('');
-          setStationState('idle');
-        }}
-        onLogout={onLogout}
-      />
+      <>
+        <StartStationView
+          actor={actor}
+          stationDoc={stationDocs.start}
+          participants={participants}
+          resultEvents={resultEvents}
+          currentCompetitor={currentCompetitor}
+          startBuffer={startBuffer}
+          setStartBuffer={setStartBuffer}
+          busyAction={busyAction}
+          setBusyAction={setBusyAction}
+          actionError={actionError}
+          setActionError={setActionError}
+          courseDraft={courseDraft}
+          setCourseDraft={setCourseDraft}
+          currentCourse={currentCourse}
+          setCurrentCourse={setCurrentCourse}
+          onReleaseStation={async () => {
+            await releaseStation('start', actor.uid);
+            setSelectedStation('');
+            setStationState('idle');
+          }}
+          onLogout={onLogout}
+          showUnavailableNotice={!depossessionNotice}
+        />
+        <ResultsNoticeDialog message={depossessionNotice} onConfirm={handleDepossessionConfirm} />
+      </>
     );
   }
 
   return (
-    <FinishStationView
-      actor={actor}
-      currentCompetitor={currentCompetitor}
-      busyAction={busyAction}
-      setBusyAction={setBusyAction}
-      actionError={actionError}
-      setActionError={setActionError}
-      onReleaseStation={async () => {
-        await releaseStation('finish', actor.uid);
-        setSelectedStation('');
-        setStationState('idle');
-      }}
-      onLogout={onLogout}
-    />
+    <>
+      <FinishStationView
+        actor={actor}
+        stationDoc={stationDocs.finish}
+        currentCompetitor={currentCompetitor}
+        busyAction={busyAction}
+        setBusyAction={setBusyAction}
+        actionError={actionError}
+        setActionError={setActionError}
+        onReleaseStation={async () => {
+          await releaseStation('finish', actor.uid);
+          setSelectedStation('');
+          setStationState('idle');
+        }}
+        onLogout={onLogout}
+        showUnavailableNotice={!depossessionNotice}
+      />
+      <ResultsNoticeDialog message={depossessionNotice} onConfirm={handleDepossessionConfirm} />
+    </>
   );
 }
 
 function StartStationView({
   actor,
+  stationDoc,
   participants,
   resultEvents,
   currentCompetitor,
@@ -436,12 +508,14 @@ function StartStationView({
   setCurrentCourse,
   onReleaseStation,
   onLogout,
+  showUnavailableNotice,
 }) {
+  const ownsStation = stationDoc?.assignedUid === actor.uid;
   const ownsCurrent = currentCompetitor?.selectedByUid === actor.uid;
   const isArmed = ownsCurrent && currentCompetitor?.status === 'armed';
   const isRunning = currentCompetitor?.status === 'running';
   const hasBufferedStart = startBuffer.length > 0;
-  const canChangeCourse = !currentCompetitor;
+  const canChangeCourse = !currentCompetitor && ownsStation;
   const [emailPopoverOpen, setEmailPopoverOpen] = useState(false);
   const currentCourseSummary = useMemo(
     () => (currentCourse ? deriveFinishedCourses(resultEvents).find((course) => course.courseId === currentCourse.courseId) : null),
@@ -511,7 +585,11 @@ function StartStationView({
 
   if (!currentCourse && !currentCompetitor) {
     return (
-      <ResultsShell title="Poste départ" subtitle="Nommer la course avant de sélectionner un participant.">
+      <ResultsShell
+        title="Poste départ"
+        titleAside={actor?.email || 'poste anonyme'}
+        subtitle="Nommer la course avant de sélectionner un participant."
+      >
         <StationToolbar onReleaseStation={onReleaseStation} onLogout={onLogout} />
         {actionError && <div className="form-error">{actionError}</div>}
         <div className="results-course-setup-card">
@@ -635,14 +713,21 @@ function StartStationView({
 
       {actionError && <div className="form-error">{actionError}</div>}
 
-      {!currentCompetitor && (
+      {!ownsStation && showUnavailableNotice && (
+        <div className="results-status-card">
+          <div className="results-big-name">Poste non disponible</div>
+          <p className="login-subtitle">Ce poste départ n’est plus affecté à votre session. Les actions sont bloquées tant que vous ne reprenez pas le poste.</p>
+        </div>
+      )}
+
+      {!currentCompetitor && ownsStation && (
         <div className="results-participant-list">
           {participants.length === 0 && <div className="stream-empty">Aucun participant disponible.</div>}
           {participants.map((participant) => (
             <button
               key={participant.id}
               className={`results-participant-button${participantCounts[participant.id] ? ' results-participant-button--done' : ''}`}
-              disabled={busyAction !== '' || !currentCourse}
+              disabled={busyAction !== '' || !currentCourse || !ownsStation}
               onClick={async () => {
                 log.info('arming competitor from start station', {
                   participantId: participant.id,
@@ -699,7 +784,7 @@ function StartStationView({
         </div>
       )}
 
-      {isArmed && (
+      {isArmed && ownsStation && (
         <div className="results-action-card">
           <div className="results-big-name">{currentCompetitor.participantLabel}</div>
           <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
@@ -770,7 +855,11 @@ function StartStationView({
         <div className="results-status-card">
           <div className="results-big-name">{currentCompetitor.participantLabel}</div>
           <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
-          <p className="login-subtitle">Course en cours. En attente de l’arrivée.</p>
+          <p className="login-subtitle">
+            {ownsStation
+              ? 'Course en cours. En attente de l’arrivée.'
+              : 'Course en cours, mais ce poste n’est plus affecté à votre session.'}
+          </p>
         </div>
       )}
     </ResultsShell>
@@ -818,6 +907,7 @@ function StartStationHeader({
 
 function FinishStationView({
   actor,
+  stationDoc,
   currentCompetitor,
   busyAction,
   setBusyAction,
@@ -825,16 +915,26 @@ function FinishStationView({
   setActionError,
   onReleaseStation,
   onLogout,
+  showUnavailableNotice,
 }) {
+  const ownsStation = stationDoc?.assignedUid === actor.uid;
   const startClickCount = Array.isArray(currentCompetitor?.pendingStartClicks)
     ? currentCompetitor.pendingStartClicks.length
     : 0;
   const canFinishCurrent = startClickCount > 0 || Number.isFinite(currentCompetitor?.latestStartAtClientMs);
 
   return (
-    <ResultsShell title="Poste arrivée" subtitle={actor.email || 'poste anonyme'}>
+    <ResultsShell noHeader>
+      <InlineStationHeader title="Poste arrivée" email={actor.email || 'poste anonyme'} />
       <StationToolbar onReleaseStation={onReleaseStation} onLogout={onLogout} />
       {actionError && <div className="form-error">{actionError}</div>}
+
+      {!ownsStation && showUnavailableNotice && (
+        <div className="results-status-card">
+          <div className="results-big-name">Poste non disponible</div>
+          <p className="login-subtitle">Ce poste arrivée n’est plus affecté à votre session. Les actions sont bloquées tant que vous ne reprenez pas le poste.</p>
+        </div>
+      )}
 
       {!currentCompetitor && (
         <div className="results-status-card">
@@ -843,7 +943,7 @@ function FinishStationView({
         </div>
       )}
 
-      {currentCompetitor && (
+      {currentCompetitor && ownsStation && (
         <div className="results-action-card">
           <div className="results-big-name">{currentCompetitor.participantLabel}</div>
           <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
@@ -910,7 +1010,33 @@ function FinishStationView({
           )}
         </div>
       )}
+
+      {currentCompetitor && !ownsStation && (
+        <div className="results-status-card">
+          <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+          <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
+          <p className="login-subtitle">Le concurrent est en attente d’arrivée, mais ce poste n’est plus affecté à votre session.</p>
+        </div>
+      )}
     </ResultsShell>
+  );
+}
+
+function InlineStationHeader({ title, email }) {
+  const [emailPopoverOpen, setEmailPopoverOpen] = useState(false);
+
+  return (
+    <div className="results-inline-header">
+      <div className="results-inline-header-title">{title}</div>
+      <button className="results-email-chip" onClick={() => setEmailPopoverOpen((value) => !value)} type="button">
+        <span className="results-email-chip-text">({email})</span>
+      </button>
+      {emailPopoverOpen && (
+        <div className="results-email-popover" onClick={() => setEmailPopoverOpen(false)}>
+          {email}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -941,18 +1067,85 @@ function StationToolbar({ onReleaseStation, onLogout }) {
   );
 }
 
-function ResultsShell({ title, subtitle, children, noHeader = false }) {
+function ResultsShell({ title, titleAside, subtitle, children, noHeader = false }) {
   return (
     <div className="results-shell">
       <div className="results-shell-card">
         {!noHeader && (
           <div className="results-shell-head">
-            <h1 className="results-shell-title">{title}</h1>
+            <div className="results-shell-title-row">
+              <h1 className="results-shell-title">{title}</h1>
+              {titleAside && (
+                <div className="results-shell-title-aside">
+                  <span className="results-shell-title-aside-text">({titleAside})</span>
+                </div>
+              )}
+            </div>
             {subtitle && <p className="results-shell-subtitle">{subtitle}</p>}
           </div>
         )}
         {children}
       </div>
+    </div>
+  );
+}
+
+function ResultsNoticeDialog({ message, onConfirm }) {
+  if (!message) return null;
+
+  return (
+    <div className="dialog-overlay">
+      <div className="dialog">
+        <div className="dialog-title">Poste retiré</div>
+        <div className="dialog-desc">{message}</div>
+        <div className="dialog-actions">
+          <button className="btn btn-primary" onClick={onConfirm}>
+            J’ai compris
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ClockStatusPanel({ clockState }) {
+  const [nowMs, setNowMs] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNowMs(Date.now()), 250);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const trustedNow = Number.isFinite(clockState.serverNow) && Number.isFinite(clockState.measuredAtClientMs)
+    ? clockState.serverNow + (nowMs - clockState.measuredAtClientMs)
+    : null;
+
+  return (
+    <div className="results-clock-panel">
+      <div className="results-clock-grid">
+        <div className="results-clock-card">
+          <div className="results-clock-label">Heure du poste</div>
+          <div className="results-clock-value">{formatClockTime(nowMs)}</div>
+        </div>
+        <div className="results-clock-card">
+          <div className="results-clock-label">Heure de référence</div>
+          <div className="results-clock-value">{trustedNow ? formatClockTime(trustedNow) : 'Indisponible'}</div>
+        </div>
+        <div className="results-clock-card">
+          <div className="results-clock-label">Décalage constaté</div>
+          <div className={`results-clock-value${Math.abs(clockState.driftMs) > 1000 ? ' results-clock-value--warn' : ''}`}>
+            {formatDrift(clockState.driftMs)}
+          </div>
+        </div>
+      </div>
+      {clockState.status === 'invalid' && (
+        <div className="form-error">L’horloge du poste dérive de plus d’une seconde par rapport à la référence.</div>
+      )}
+      {clockState.status === 'unavailable' && (
+        <div className="results-clock-note">
+          Source de temps indisponible. {clockState.error || 'Le décalage n’a pas pu être vérifié.'}
+        </div>
+      )}
     </div>
   );
 }
@@ -989,9 +1182,25 @@ function statusLabel(status) {
 
 function getErrorLabel(error) {
   if (error?.message === 'station-occupied') return 'Ce poste est déjà utilisé sur un autre appareil.';
+  if (error?.message === 'station-not-owned') return 'Ce poste n’est plus affecté à votre session.';
+  if (error?.message === 'station-not-claimed') return 'Ce poste n’est plus réservé.';
   if (error?.message === 'current-competitor-busy') return 'Un concurrent est déjà en cours.';
   if (error?.message === 'no-current-competitor') return 'Aucun concurrent en cours.';
+  if (error?.message === 'clock-check-failed') return 'La source de temps n’a pas répondu.';
   return error?.code ? `Erreur : ${error.code}` : error?.message || 'Une erreur est survenue.';
+}
+
+function formatClockTime(ms) {
+  return new Date(ms).toLocaleTimeString('fr-FR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function formatDrift(driftMs) {
+  const sign = driftMs > 0 ? '+' : driftMs < 0 ? '-' : '';
+  return `${sign}${Math.abs(Math.round(driftMs))} ms`;
 }
 
 function slugifyCourse(value) {

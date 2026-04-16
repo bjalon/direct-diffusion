@@ -772,6 +772,11 @@ html, body, #root {
   transition: border-color 0.15s;
 }
 
+.stream-dialog {
+  max-width: 720px;
+  width: min(720px, 92vw);
+}
+
 .stream-item:hover {
   border-color: rgba(24, 119, 242, 0.35);
 }
@@ -1280,6 +1285,48 @@ html, body, #root {
 .admin-subline {
   color: var(--muted);
   font-size: 12px;
+}
+
+.admin-url-line {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .stream-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .stream-thumb {
+    display: none;
+  }
+
+  .stream-item .orientation-toggle {
+    width: 100%;
+    overflow: auto;
+  }
+
+  .stream-item .btn {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .stream-dialog {
+    width: min(92vw, 560px);
+    padding: 24px 20px 20px;
+  }
+
+  .dialog-actions {
+    flex-direction: column;
+  }
+
+  .dialog-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .admin-actions {
@@ -1794,11 +1841,48 @@ html, body, #root {
   gap: 6px;
 }
 
+.results-shell-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.results-inline-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.results-inline-header-title {
+  font-size: 28px;
+  line-height: 1.1;
+  letter-spacing: -0.8px;
+  color: var(--text);
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
 .results-shell-title {
   font-size: 28px;
   line-height: 1.1;
   letter-spacing: -0.8px;
   color: var(--text);
+}
+
+.results-shell-title-aside {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.results-shell-title-aside-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .results-shell-subtitle {
@@ -1920,6 +2004,56 @@ html, body, #root {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
+}
+
+.results-clock-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.results-clock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.results-clock-card {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.results-clock-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.results-clock-value {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.results-clock-value--warn {
+  color: #ffb74d;
+}
+
+.results-clock-note {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(24, 119, 242, 0.22);
+  background: rgba(24, 119, 242, 0.1);
 }
 
 .results-station-card {

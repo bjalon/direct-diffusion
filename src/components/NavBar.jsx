@@ -4,6 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 const ALL_LINKS = [
   { to: '/',             label: 'Affichage',    role: null },
   { to: '/config',       label: 'Flux',         role: null },
+  { to: '/streams-admin', label: 'Flux admin',  role: 'streams_admin' },
   { to: '/layouts',      label: 'Layouts',      role: null },
   { to: '/participants', label: 'Participants', role: 'participants' },
   { to: '/results-admin', label: 'Résultats',   role: 'administration' },

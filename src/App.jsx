@@ -17,6 +17,7 @@ import LayoutsPage from './pages/LayoutsPage';
 import ResultsAuditPage from './pages/ResultsAuditPage';
 import ResultsArchivePage from './pages/ResultsArchivePage';
 import ResultsPage from './pages/ResultsPage';
+import AdminStreamsPage from './pages/AdminStreamsPage';
 import { BUILTIN_VIRTUAL_STREAM } from './utils/virtualDisplay';
 import { subscribeResultAccess, subscribeResultAccessRequest } from './firebase/results';
 
@@ -155,6 +156,7 @@ export default function App() {
       return {
         administration: !!roles.administration && hasGoogleProvider(user),
         admin_flux: !!roles.admin_flux && hasGoogleProvider(user),
+        streams_admin: (!!roles.admin_flux || !!roles.administration) && hasGoogleProvider(user),
         participants: !!roles.participants && hasGoogleProvider(user),
         tv: false,
         identityLabel: user?.email || '',
@@ -165,6 +167,7 @@ export default function App() {
       return {
         administration: false,
         admin_flux: false,
+        streams_admin: false,
         participants: false,
         tv: true,
         identityLabel: deviceAccess.email || user.uid,
@@ -233,7 +236,12 @@ function AppShell({
 }) {
   const { pathname } = useLocation();
   const handleLogout = () => signOut(auth);
+  const hasLightResultsAccess = !!(user?.isAnonymous && (deviceAccess?.results_start || deviceAccess?.results_finish));
   const showNavbar = pathname !== '/results' && !!user && user !== false && !!permissions;
+
+  if (hasLightResultsAccess && pathname !== '/results') {
+    return <Navigate to="/results" replace />;
+  }
 
   return (
     <div className="app-root">
@@ -268,7 +276,24 @@ function AppShell({
                 deviceAccess={deviceAccess}
                 deviceRequest={deviceRequest}
               >
-                <ConfigPage config={config} onUpdate={updateConfig} canEditStreams={!!permissions?.admin_flux} />
+                <ConfigPage config={config} onUpdate={updateConfig} />
+              </RegularRoute>
+            )}
+          />
+          <Route
+            path="/streams-admin"
+            element={(
+              <RegularRoute
+                user={user}
+                permissions={permissions}
+                requiredRole="streams_admin"
+                accessRequestState={accessRequestState}
+                setAccessRequestState={setAccessRequestState}
+                onLogout={handleLogout}
+                deviceAccess={deviceAccess}
+                deviceRequest={deviceRequest}
+              >
+                <AdminStreamsPage />
               </RegularRoute>
             )}
           />

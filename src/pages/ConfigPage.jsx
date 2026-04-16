@@ -1,19 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
-  generateId,
   getLayouts,
   loadCustomLayouts,
 } from '../utils/storage';
-import { parseInput } from '../utils/iframeParser';
 import { BUILTIN_VIRTUAL_STREAM, BUILTIN_VIRTUAL_STREAM_ID } from '../utils/virtualDisplay';
 import LayoutPicker from '../components/LayoutPicker';
-
-const ROTATION_OPTIONS = [
-  { value: 0, label: '0°', title: 'Pas de rotation' },
-  { value: 90, label: '+90°', title: 'Rotation +90° (sens horaire)' },
-  { value: -90, label: '−90°', title: 'Rotation −90° (sens antihoraire)' },
-  { value: 180, label: '180°', title: 'Retournement' },
-];
 
 const DELAY_OPTIONS = [5, 10, 15, 30, 60];
 
@@ -21,23 +12,6 @@ function streamRotation(stream) {
   if (typeof stream.rotation === 'number') return stream.rotation;
   const legacy = { 'landscape-ccw': -90, 'landscape-cw': 90, landscape: -90, portrait: 0 };
   return legacy[stream.orientation] ?? 0;
-}
-
-function RotationPicker({ value, onChange }) {
-  return (
-    <div className="orientation-toggle">
-      {ROTATION_OPTIONS.map((opt) => (
-        <button
-          key={opt.value}
-          className={`orient-btn${value === opt.value ? ' active' : ''}`}
-          onClick={() => onChange(opt.value)}
-          title={opt.title}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 function DelayPicker({ value, onChange }) {
@@ -77,12 +51,7 @@ function NumberSetting({ label, value, onChange, min, max, step, suffix }) {
   );
 }
 
-export default function ConfigPage({ config, onUpdate, canEditStreams = false }) {
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [iframeInput, setIframeInput] = useState('');
-  const [streamLabel, setStreamLabel] = useState('');
-  const [rotation, setRotation] = useState(0);
-  const [parseError, setParseError] = useState('');
+export default function ConfigPage({ config, onUpdate }) {
   const [customLayouts] = useState(loadCustomLayouts);
 
   const layouts = useMemo(() => getLayouts(customLayouts), [customLayouts]);
@@ -102,65 +71,6 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
     }));
   };
 
-  const handleIframeChange = (e) => {
-    const value = e.target.value;
-    setIframeInput(value);
-    setParseError('');
-    if (value.trim()) {
-      const parsed = parseInput(value);
-      if (parsed) setRotation(parsed.originalHeight > parsed.originalWidth ? -90 : 0);
-    }
-  };
-
-  const handleAddStream = () => {
-    setParseError('');
-    const parsed = parseInput(iframeInput);
-    if (!parsed) {
-      setParseError(
-        'Format invalide. Collez un lien Facebook (https://www.facebook.com/.../videos/...) ou un code <iframe ...>.',
-      );
-      return;
-    }
-    const id = generateId();
-    const label = streamLabel.trim() || `Flux ${config.streams.length + 1}`;
-    onUpdate((prev) => ({
-      ...prev,
-      streams: [
-        ...prev.streams,
-        {
-          id,
-          label,
-          src: parsed.src,
-          videoUrl: parsed.videoUrl,
-          rotation,
-          originalWidth: parsed.originalWidth,
-          originalHeight: parsed.originalHeight,
-        },
-      ],
-    }));
-    setIframeInput('');
-    setStreamLabel('');
-    setRotation(0);
-    setShowAddForm(false);
-  };
-
-  const handleRemoveStream = (streamId) => {
-    onUpdate((prev) => ({
-      ...prev,
-      streams: prev.streams.filter((s) => s.id !== streamId),
-      slots: Object.fromEntries(
-        Object.entries(prev.slots).map(([k, v]) => [k, v === streamId ? null : v]),
-      ),
-    }));
-  };
-
-  const handleRenameStream = (streamId, newLabel) => {
-    onUpdate((prev) => ({
-      ...prev,
-      streams: prev.streams.map((s) => (s.id === streamId ? { ...s, label: newLabel } : s)),
-    }));
-  };
-
   const handleDelayChange = (newDelay) => {
     onUpdate((prev) => ({
       ...prev,
@@ -173,13 +83,6 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
     onUpdate((prev) => ({
       ...prev,
       [key]: Math.max(min, safeValue),
-    }));
-  };
-
-  const handleRotationChange = (streamId, newRotation) => {
-    onUpdate((prev) => ({
-      ...prev,
-      streams: prev.streams.map((s) => (s.id === streamId ? { ...s, rotation: newRotation } : s)),
     }));
   };
 
@@ -277,79 +180,15 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
                 </svg>
               </div>
               <div className="stream-info">
-                {canEditStreams ? (
-                  <input
-                    className="stream-label-input"
-                    value={stream.label}
-                    onChange={(e) => handleRenameStream(stream.id, e.target.value)}
-                  />
-                ) : (
-                  <span className="stream-label-input" style={{ cursor: 'default' }}>{stream.label}</span>
-                )}
+                <span className="stream-label-input" style={{ cursor: 'default' }}>{stream.label}</span>
                 <div className="stream-url" title={stream.videoUrl}>
                   {stream.videoUrl}
                 </div>
               </div>
-              {canEditStreams && (
-                <>
-                  <RotationPicker value={streamRotation(stream)} onChange={(r) => handleRotationChange(stream.id, r)} />
-                  <button className="btn btn-danger btn-sm" onClick={() => handleRemoveStream(stream.id)}>
-                    Supprimer
-                  </button>
-                </>
-              )}
+              <div className="admin-subline">Rotation : {streamRotation(stream)}°</div>
             </div>
           ))}
         </div>
-
-        {canEditStreams && (showAddForm ? (
-          <div className="add-stream-form">
-            <label className="form-label">Nom du flux</label>
-            <input
-              className="form-input"
-              placeholder="Ex : Caméra principale"
-              value={streamLabel}
-              onChange={(e) => setStreamLabel(e.target.value)}
-            />
-
-            <label className="form-label">Lien ou code iframe Facebook</label>
-            <textarea
-              className="form-textarea"
-              placeholder={'Lien Facebook :\nhttps://www.facebook.com/xxx/videos/yyy/\n\nou code iframe complet :\n<iframe src="https://www.facebook.com/plugins/video.php?..." ...>'}
-              value={iframeInput}
-              onChange={handleIframeChange}
-              rows={6}
-              spellCheck={false}
-            />
-
-            <label className="form-label">Rotation</label>
-            <RotationPicker value={rotation} onChange={setRotation} />
-
-            {parseError && <div className="form-error">{parseError}</div>}
-
-            <div className="form-actions">
-              <button className="btn btn-primary" onClick={handleAddStream}>
-                Ajouter
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={() => {
-                  setShowAddForm(false);
-                  setIframeInput('');
-                  setStreamLabel('');
-                  setRotation(0);
-                  setParseError('');
-                }}
-              >
-                Annuler
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button className="btn btn-primary" onClick={() => setShowAddForm(true)}>
-            + Ajouter un flux
-          </button>
-        ))}
       </section>
     </div>
   );
