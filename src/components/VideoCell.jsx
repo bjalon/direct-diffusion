@@ -2,7 +2,14 @@ import { useRef, useState, useEffect } from 'react';
 import ResultsRotationDisplay from './displays/ResultsRotationDisplay';
 
 const VIRTUAL_COMPONENTS = {
-  'results-rotation': (s) => <ResultsRotationDisplay delay={s.delay ?? 10} />,
+  'results-rotation': (s) => (
+    <ResultsRotationDisplay
+      delay={s.delay ?? 10}
+      startPause={s.startPause ?? 4}
+      scrollSpeed={s.scrollSpeed ?? 28}
+      endPause={s.endPause ?? 4}
+    />
+  ),
 };
 
 /**

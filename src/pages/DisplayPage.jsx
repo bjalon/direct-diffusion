@@ -3,7 +3,7 @@ import VideoCell from '../components/VideoCell';
 
 export default function DisplayPage({ config }) {
   const layout = LAYOUTS[config.layout] ?? LAYOUTS['1'];
-  const { cols, rows, slots: slotCount } = layout;
+  const { cols, rows, placements } = layout;
 
   const getStream = (slotIndex) => {
     const streamId = config.slots[slotIndex];
@@ -19,9 +19,18 @@ export default function DisplayPage({ config }) {
         gridTemplateRows: `repeat(${rows}, 1fr)`,
       }}
     >
-      {Array.from({ length: slotCount }, (_, i) => (
-        // Key includes layout so VideoCell remounts (and remeasures) on layout change
-        <VideoCell key={`${config.layout}-${i}`} stream={getStream(i)} slotIndex={i} />
+      {placements.map((placement, i) => (
+        <div
+          key={`${config.layout}-${i}`}
+          style={{
+            gridColumn: `${placement.col} / span ${placement.colSpan ?? 1}`,
+            gridRow: `${placement.row} / span ${placement.rowSpan ?? 1}`,
+            minWidth: 0,
+            minHeight: 0,
+          }}
+        >
+          <VideoCell stream={getStream(i)} slotIndex={i} />
+        </div>
       ))}
     </div>
   );

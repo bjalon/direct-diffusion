@@ -157,7 +157,13 @@ export default function App() {
         config={{
           ...layoutSlots,
           streams: [
-            { ...BUILTIN_VIRTUAL_STREAM, delay: layoutSlots.virtualDisplayDelay ?? 10 },
+            {
+              ...BUILTIN_VIRTUAL_STREAM,
+              delay: layoutSlots.virtualDisplayDelay ?? 10,
+              startPause: layoutSlots.virtualDisplayStartPause ?? 4,
+              scrollSpeed: layoutSlots.virtualDisplayScrollSpeed ?? 28,
+              endPause: layoutSlots.virtualDisplayEndPause ?? 4,
+            },
             ...streams.filter((stream) => !stream.type),
           ],
         }}

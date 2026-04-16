@@ -58,6 +58,26 @@ function DelayPicker({ value, onChange }) {
   );
 }
 
+function NumberSetting({ label, value, onChange, min, max, step, suffix }) {
+  return (
+    <label className="virtual-setting">
+      <span className="virtual-setting-label">{label}</span>
+      <div className="virtual-setting-input-wrap">
+        <input
+          className="form-input virtual-setting-input"
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+        {suffix && <span className="virtual-setting-suffix">{suffix}</span>}
+      </div>
+    </label>
+  );
+}
+
 // ── Config page ────────────────────────────────────────────────────────────
 
 export default function ConfigPage({ config, onUpdate, canEditStreams = false }) {
@@ -157,6 +177,14 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
     }));
   };
 
+  const handleVirtualSettingChange = (key, nextValue, fallback, min) => {
+    const safeValue = Number.isFinite(nextValue) ? nextValue : fallback;
+    onUpdate((prev) => ({
+      ...prev,
+      [key]: Math.max(min, safeValue),
+    }));
+  };
+
   // --- Change rotation ---
   const handleRotationChange = (streamId, newRotation) => {
     onUpdate((prev) => ({
@@ -220,7 +248,41 @@ export default function ConfigPage({ config, onUpdate, canEditStreams = false })
         <p className="hint" style={{ marginBottom: 12 }}>
           Le flux virtuel “Résultats” alterne entre les courses terminées et le classement général.
         </p>
-        <DelayPicker value={config.virtualDisplayDelay ?? 10} onChange={handleDelayChange} />
+        <div className="virtual-settings-group">
+          <div>
+            <div className="virtual-settings-subtitle">Temporisation entre les vues</div>
+            <DelayPicker value={config.virtualDisplayDelay ?? 10} onChange={handleDelayChange} />
+          </div>
+          <div className="virtual-settings-grid">
+            <NumberSetting
+              label="Pause avant scroll"
+              value={config.virtualDisplayStartPause ?? 4}
+              min={0}
+              max={30}
+              step={0.5}
+              suffix="s"
+              onChange={(value) => handleVirtualSettingChange('virtualDisplayStartPause', value, 4, 0)}
+            />
+            <NumberSetting
+              label="Vitesse de scroll"
+              value={config.virtualDisplayScrollSpeed ?? 28}
+              min={5}
+              max={200}
+              step={1}
+              suffix="px/s"
+              onChange={(value) => handleVirtualSettingChange('virtualDisplayScrollSpeed', value, 28, 5)}
+            />
+            <NumberSetting
+              label="Pause en bas"
+              value={config.virtualDisplayEndPause ?? 4}
+              min={0}
+              max={30}
+              step={0.5}
+              suffix="s"
+              onChange={(value) => handleVirtualSettingChange('virtualDisplayEndPause', value, 4, 0)}
+            />
+          </div>
+        </div>
       </section>
 
       {/* ── Bibliothèque de flux ── */}

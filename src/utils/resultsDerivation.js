@@ -76,22 +76,34 @@ export function deriveCourseSummaries(events) {
     .map((course) => ({
       ...course,
       runs: [...course.runs].sort((a, b) => parseTime(a.durationLabel) - parseTime(b.durationLabel)),
+      startedAtClientMs: course.runs.reduce(
+        (min, run) => Math.min(min, run.latestStartAtClientMs ?? Number.POSITIVE_INFINITY),
+        Number.POSITIVE_INFINITY,
+      ),
     }))
     .sort((a, b) => b.lastFinishedAtClientMs - a.lastFinishedAtClientMs);
 }
 
 export function deriveGeneralRanking(events) {
   const runs = deriveRunsFromEvents(events);
-  const bestByParticipant = new Map();
+  const courseOrder = new Map(
+    [...runs]
+      .filter((run) => run.courseId)
+      .sort((a, b) => (a.latestStartAtClientMs ?? 0) - (b.latestStartAtClientMs ?? 0))
+      .reduce((acc, run) => {
+        if (!acc.some(([courseId]) => courseId === run.courseId)) {
+          acc.push([run.courseId, acc.length + 1]);
+        }
+        return acc;
+      }, []),
+  );
 
-  runs.forEach((run) => {
-    const existing = bestByParticipant.get(run.participantId);
-    if (!existing || parseTime(run.durationLabel) < parseTime(existing.durationLabel)) {
-      bestByParticipant.set(run.participantId, run);
-    }
-  });
-
-  return [...bestByParticipant.values()].sort((a, b) => parseTime(a.durationLabel) - parseTime(b.durationLabel));
+  return [...runs]
+    .map((run) => ({
+      ...run,
+      courseNumber: courseOrder.get(run.courseId) ?? null,
+    }))
+    .sort((a, b) => parseTime(a.durationLabel) - parseTime(b.durationLabel));
 }
 
 export function deriveLatestCourse(events) {

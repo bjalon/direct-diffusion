@@ -13,12 +13,19 @@ export default function LayoutPicker({ selected, onChange }) {
           <div
             className="layout-preview"
             style={{
-              gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
-              gridTemplateRows: `repeat(${layout.rows}, 1fr)`,
+              gridTemplateColumns: `repeat(${layout.previewCols}, 1fr)`,
+              gridTemplateRows: `repeat(${layout.previewRows}, 1fr)`,
             }}
           >
-            {Array.from({ length: layout.slots }, (_, i) => (
-              <div key={i} className="layout-preview-cell" />
+            {layout.placements.map((placement, i) => (
+              <div
+                key={i}
+                className="layout-preview-cell"
+                style={{
+                  gridColumn: `${placement.col} / span ${placement.colSpan ?? 1}`,
+                  gridRow: `${placement.row} / span ${placement.rowSpan ?? 1}`,
+                }}
+              />
             ))}
           </div>
           <span className="layout-label">{layout.label}</span>
