@@ -10,8 +10,8 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.token.email != null;
     }
 
-    function userEmail() {
-      return lower(request.auth.token.email);
+    function authEmail() {
+      return request.auth.token.email;
     }
 
     function isGoogleUser() {
@@ -22,11 +22,11 @@ service cloud.firestore {
 
     function isAllowedUser() {
       return hasEmail()
-             && exists(/databases/$(database)/documents/allowedUsers/$(userEmail()));
+             && exists(/databases/$(database)/documents/allowedUsers/$(authEmail()));
     }
 
     function userRoles() {
-      return get(/databases/$(database)/documents/allowedUsers/$(userEmail())).data;
+      return get(/databases/$(database)/documents/allowedUsers/$(authEmail())).data;
     }
 
     function hasRole(role) {
@@ -68,17 +68,17 @@ service cloud.firestore {
     }
 
     match /allowedUsers/{email} {
-      allow get: if hasEmail() && lower(email) == userEmail();
+      allow get: if hasEmail() && email == authEmail();
       allow list: if isAdministration();
       allow create, update, delete: if isAdministration();
     }
 
     match /accessRequests/{email} {
       allow create: if hasEmail()
-                    && lower(email) == userEmail()
-                    && lower(request.resource.data.email) == userEmail()
+                    && email == authEmail()
+                    && request.resource.data.email == authEmail()
                     && request.resource.data.status == 'pending';
-      allow get: if isAdministration() || (hasEmail() && lower(email) == userEmail());
+      allow get: if isAdministration() || (hasEmail() && email == authEmail());
       allow list: if isAdministration();
       allow update, delete: if isAdministration();
     }
