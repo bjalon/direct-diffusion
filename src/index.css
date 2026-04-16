@@ -1226,6 +1226,12 @@ html, body, #root {
   flex: 1;
 }
 
+.admin-section-note {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .admin-counter {
   min-width: 28px;
   height: 28px;
@@ -1311,6 +1317,18 @@ html, body, #root {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: auto;
+}
+
+.admin-row-start td {
+  background: rgba(76, 175, 80, 0.26);
+}
+
+.admin-row-finish td {
+  background: rgba(229, 57, 53, 0.26);
+}
+
+.admin-row-start.admin-row-finish td {
+  background: linear-gradient(90deg, rgba(76, 175, 80, 0.26), rgba(229, 57, 53, 0.26));
 }
 
 .admin-table {

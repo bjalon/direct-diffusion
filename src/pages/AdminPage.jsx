@@ -15,6 +15,7 @@ import {
   saveAllowedResultUser,
   subscribeAllowedResultUsers,
   subscribePendingResultAccessRequests,
+  subscribeStation,
 } from '../firebase/results';
 import { createLogger } from '../utils/logger';
 
@@ -45,6 +46,7 @@ export default function AdminPage({ currentUser }) {
   const [requests, setRequests] = useState([]);
   const [allowedResultUsers, setAllowedResultUsers] = useState([]);
   const [resultRequests, setResultRequests] = useState([]);
+  const [stationAssignments, setStationAssignments] = useState({ start: null, finish: null });
   const [newEmail, setNewEmail] = useState('');
   const [newRoles, setNewRoles] = useState(DEFAULT_NORMAL_ROLES);
   const [busyKey, setBusyKey] = useState('');
@@ -55,6 +57,12 @@ export default function AdminPage({ currentUser }) {
   useEffect(() => subscribeAccessRequests(setRequests), []);
   useEffect(() => subscribeAllowedResultUsers(setAllowedResultUsers), []);
   useEffect(() => subscribePendingResultAccessRequests(setResultRequests), []);
+  useEffect(() => subscribeStation('start', (doc) => {
+    setStationAssignments((prev) => ({ ...prev, start: doc }));
+  }), []);
+  useEffect(() => subscribeStation('finish', (doc) => {
+    setStationAssignments((prev) => ({ ...prev, finish: doc }));
+  }), []);
 
   const currentEmail = currentUser?.email?.trim().toLowerCase() ?? '';
   const currentUserEntry = useMemo(
@@ -413,7 +421,7 @@ export default function AdminPage({ currentUser }) {
 
       <section className="config-section">
         <div className="admin-section-head">
-          <h2 className="section-title">Utilisateurs non-OAuth</h2>
+          <h2 className="section-title">Utilisateurs non-OAuth <span className="admin-section-note">(vert départ et rouge arrivée actuels)</span></h2>
           <span className="admin-counter">{allowedResultUsers.length}</span>
         </div>
         {allowedResultUsers.length === 0 ? (
@@ -431,10 +439,20 @@ export default function AdminPage({ currentUser }) {
                 </tr>
               </thead>
               <tbody>
-                {allowedResultUsers.map((entry) => (
-                  <tr key={entry.id}>
+                {allowedResultUsers.map((entry) => {
+                  const isStartOperator = stationAssignments.start?.assignedUid === entry.id;
+                  const isFinishOperator = stationAssignments.finish?.assignedUid === entry.id;
+                  const rowClassName = [
+                    isStartOperator ? 'admin-row-start' : '',
+                    isFinishOperator ? 'admin-row-finish' : '',
+                  ].filter(Boolean).join(' ');
+
+                  return (
+                  <tr key={entry.id} className={rowClassName}>
                     <td>
                       <div className="admin-email">{entry.email || '—'}</div>
+                      {isStartOperator && <div className="admin-subline">Poste départ actif</div>}
+                      {isFinishOperator && <div className="admin-subline">Poste arrivée actif</div>}
                     </td>
                     <td className="admin-uid">{entry.uid || entry.id}</td>
                     {LIGHT_ROLE_KEYS.map((role) => {
@@ -463,7 +481,8 @@ export default function AdminPage({ currentUser }) {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
