@@ -225,6 +225,17 @@ export function subscribeStation(station, onData) {
   });
 }
 
+async function assertStationOwned(station, uid) {
+  const snap = await getDoc(RESULT_STATION(station));
+  if (!snap.exists()) {
+    throw new Error('station-not-claimed');
+  }
+  if (snap.data().assignedUid !== uid) {
+    throw new Error('station-not-owned');
+  }
+  return snap.data();
+}
+
 export async function claimStation(station, actor) {
   log.info('claimStation start', { station, actor });
   await runTransaction(db, async (transaction) => {
@@ -299,6 +310,26 @@ export async function releaseStation(station, uid) {
   });
 }
 
+export async function releaseStationAsAdmin(station) {
+  log.info('releaseStationAsAdmin start', { station });
+  const ref = RESULT_STATION(station);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+
+  if (station === 'start') {
+    await setDoc(ref, {
+      assignedUid: null,
+      assignedEmail: '',
+      assignedProviderId: '',
+      assignedAt: deleteField(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    return;
+  }
+
+  await deleteDoc(ref);
+}
+
 export function subscribeCurrentCompetitor(onData) {
   return onSnapshot(CURRENT_COMPETITOR, (snap) => {
     const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
@@ -331,6 +362,14 @@ export async function armCurrentCompetitor({
   const selectedAtClientIso = new Date(selectedAtClientMs).toISOString();
 
   await runTransaction(db, async (transaction) => {
+    const stationSnap = await transaction.get(RESULT_STATION('start'));
+    if (!stationSnap.exists()) {
+      throw new Error('station-not-claimed');
+    }
+    if (stationSnap.data().assignedUid !== actor.uid) {
+      throw new Error('station-not-owned');
+    }
+
     const currentSnap = await transaction.get(CURRENT_COMPETITOR);
     if (currentSnap.exists()) {
       throw new Error('current-competitor-busy');
@@ -373,6 +412,14 @@ export async function armCurrentCompetitor({
 export async function cancelCurrentCompetitor(runId, uid) {
   log.info('cancelCurrentCompetitor start', { runId, uid });
   await runTransaction(db, async (transaction) => {
+    const stationSnap = await transaction.get(RESULT_STATION('start'));
+    if (!stationSnap.exists()) {
+      throw new Error('station-not-claimed');
+    }
+    if (stationSnap.data().assignedUid !== uid) {
+      throw new Error('station-not-owned');
+    }
+
     const snap = await transaction.get(CURRENT_COMPETITOR);
     if (!snap.exists()) return;
 
@@ -397,6 +444,7 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
     clickCount: clicks.length,
     actor,
   });
+  await assertStationOwned('start', actor.uid);
 
   const officialStart = clicks[0];
   const batch = writeBatch(db);
@@ -467,6 +515,7 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
 
 export async function mirrorPendingStartClicks({ currentCompetitor, clicks, actor }) {
   if (!currentCompetitor?.runId) return;
+  await assertStationOwned('start', actor.uid);
   const latestStart = clicks[clicks.length - 1] ?? null;
 
   log.info('mirrorPendingStartClicks', {
@@ -493,6 +542,7 @@ export async function mirrorPendingStartClicks({ currentCompetitor, clicks, acto
 
 export async function completeCurrentCompetitor({ actor, click }) {
   log.info('completeCurrentCompetitor start', { actor, click });
+  await assertStationOwned('finish', actor.uid);
   const currentSnap = await getDoc(CURRENT_COMPETITOR);
   if (!currentSnap.exists()) {
     throw new Error('no-current-competitor');
@@ -593,6 +643,106 @@ export async function completeCurrentCompetitor({ actor, click }) {
     finishAtClientMs: click.clickedAtClientMs,
     durationMs,
     durationLabel,
+  };
+}
+
+export async function abandonCurrentCompetitor({ actor, click }) {
+  log.info('abandonCurrentCompetitor start', { actor, click });
+  await assertStationOwned('finish', actor.uid);
+  const currentSnap = await getDoc(CURRENT_COMPETITOR);
+  if (!currentSnap.exists()) {
+    throw new Error('no-current-competitor');
+  }
+
+  const current = currentSnap.data();
+  const pendingStartClicks = Array.isArray(current.pendingStartClicks) ? current.pendingStartClicks : [];
+  const latestPendingStart = pendingStartClicks[pendingStartClicks.length - 1] ?? null;
+
+  if (!latestPendingStart && !Number.isFinite(current.latestStartAtClientMs)) {
+    throw new Error('no-start-click');
+  }
+
+  const startReference = latestPendingStart ?? {
+    clickId: current.latestStartClickId,
+    clickedAtClientMs: current.latestStartAtClientMs,
+    clickedAtClientIso: current.latestStartAtClientIso,
+  };
+
+  const batch = writeBatch(db);
+
+  pendingStartClicks.forEach((startClick) => {
+    batch.set(RESULT_EVENT(startClick.clickId), {
+      clickId: startClick.clickId,
+      runId: current.runId,
+      startId: current.startId,
+      courseId: current.courseId,
+      courseLabel: current.courseLabel,
+      participantId: current.participantId,
+      participantLabel: current.participantLabel,
+      type: 'start',
+      station: 'start',
+      active: true,
+      actorUid: current.startedByUid || current.selectedByUid,
+      actorEmail: current.startedByEmail || current.selectedByEmail || '',
+      actorProviderId: actor.providerId ?? 'anonymous',
+      clickedAtClientMs: startClick.clickedAtClientMs,
+      clickedAtClientIso: startClick.clickedAtClientIso,
+      syncedAtServer: serverTimestamp(),
+    }, { merge: true });
+  });
+
+  batch.set(RESULT_EVENT(click.clickId), {
+    clickId: click.clickId,
+    runId: current.runId,
+    startId: current.startId,
+    courseId: current.courseId,
+    courseLabel: current.courseLabel,
+    participantId: current.participantId,
+    participantLabel: current.participantLabel,
+    type: 'abandon',
+    station: 'finish',
+    active: true,
+    actorUid: actor.uid,
+    actorEmail: actor.email ?? '',
+    actorProviderId: actor.providerId ?? 'anonymous',
+    clickedAtClientMs: click.clickedAtClientMs,
+    clickedAtClientIso: click.clickedAtClientIso,
+    syncedAtServer: serverTimestamp(),
+  }, { merge: true });
+
+  batch.set(RESULT_RUN(current.runId), {
+    status: 'abandoned',
+    startId: current.startId,
+    courseId: current.courseId,
+    courseLabel: current.courseLabel,
+    participantId: current.participantId,
+    participantLabel: current.participantLabel,
+    officialStartClickId: current.officialStartClickId || startReference.clickId,
+    officialStartAtClientMs: current.officialStartAtClientMs || startReference.clickedAtClientMs,
+    officialStartAtClientIso: current.officialStartAtClientIso || startReference.clickedAtClientIso,
+    latestStartClickId: startReference.clickId,
+    latestStartAtClientMs: startReference.clickedAtClientMs,
+    latestStartAtClientIso: startReference.clickedAtClientIso,
+    abandonClickId: click.clickId,
+    abandonAtClientMs: click.clickedAtClientMs,
+    abandonAtClientIso: click.clickedAtClientIso,
+    abandonedByUid: actor.uid,
+    abandonedByEmail: actor.email ?? '',
+    abandonedAtServer: serverTimestamp(),
+    durationMs: null,
+    durationLabel: null,
+    pendingStartClicks: [],
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  batch.delete(CURRENT_COMPETITOR);
+  await batch.commit();
+
+  return {
+    ...current,
+    abandonClickId: click.clickId,
+    abandonAtClientMs: click.clickedAtClientMs,
+    status: 'abandoned',
   };
 }
 

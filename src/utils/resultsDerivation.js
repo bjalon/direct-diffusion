@@ -24,30 +24,43 @@ export function deriveRunsFromEvents(events) {
   byStartId.forEach((bucket, startId) => {
     const starts = bucket.filter((event) => event.type === 'start').sort(sortByClientTimeAsc);
     const finishes = bucket.filter((event) => event.type === 'finish').sort(sortByClientTimeAsc);
-    if (starts.length === 0 || finishes.length === 0) return;
+    const abandons = bucket.filter((event) => event.type === 'abandon').sort(sortByClientTimeAsc);
+    if (starts.length === 0) return;
 
     const latestStart = starts[starts.length - 1];
-    const latestFinish = finishes[finishes.length - 1];
-    if (!Number.isFinite(latestStart.clickedAtClientMs) || !Number.isFinite(latestFinish.clickedAtClientMs)) return;
-    if (latestFinish.clickedAtClientMs < latestStart.clickedAtClientMs) return;
+    const latestFinish = finishes[finishes.length - 1] ?? null;
+    const latestAbandon = abandons[abandons.length - 1] ?? null;
+    const lastTerminalEvent = [latestFinish, latestAbandon]
+      .filter(Boolean)
+      .sort(sortByClientTimeDesc)[0] ?? null;
+    if (!lastTerminalEvent) return;
 
-    const durationMs = latestFinish.clickedAtClientMs - latestStart.clickedAtClientMs;
+    if (!Number.isFinite(latestStart.clickedAtClientMs) || !Number.isFinite(lastTerminalEvent.clickedAtClientMs)) return;
+    if (lastTerminalEvent.clickedAtClientMs < latestStart.clickedAtClientMs) return;
+
+    const isAbandoned = lastTerminalEvent.type === 'abandon';
+    const durationMs = isAbandoned ? null : lastTerminalEvent.clickedAtClientMs - latestStart.clickedAtClientMs;
     const run = {
       startId,
-      runId: latestStart.runId || latestFinish.runId || startId,
-      courseId: latestStart.courseId || latestFinish.courseId || '',
-      courseLabel: latestStart.courseLabel || latestFinish.courseLabel || latestStart.courseId || latestFinish.courseId || '—',
-      participantId: latestStart.participantId || latestFinish.participantId,
-      participantLabel: latestStart.participantLabel || latestFinish.participantLabel || '—',
+      runId: latestStart.runId || lastTerminalEvent.runId || startId,
+      courseId: latestStart.courseId || lastTerminalEvent.courseId || '',
+      courseLabel: latestStart.courseLabel || lastTerminalEvent.courseLabel || latestStart.courseId || lastTerminalEvent.courseId || '—',
+      participantId: latestStart.participantId || lastTerminalEvent.participantId,
+      participantLabel: latestStart.participantLabel || lastTerminalEvent.participantLabel || '—',
       latestStartClickId: latestStart.clickId,
-      latestFinishClickId: latestFinish.clickId,
+      latestFinishClickId: latestFinish?.clickId ?? null,
+      latestAbandonClickId: latestAbandon?.clickId ?? null,
       latestStartAtClientMs: latestStart.clickedAtClientMs,
-      latestFinishAtClientMs: latestFinish.clickedAtClientMs,
+      latestFinishAtClientMs: latestFinish?.clickedAtClientMs ?? null,
+      latestAbandonAtClientMs: latestAbandon?.clickedAtClientMs ?? null,
+      status: isAbandoned ? 'abandoned' : 'finished',
+      isAbandoned,
       durationMs,
-      durationLabel: (durationMs / 1000).toFixed(3),
+      durationLabel: durationMs == null ? null : (durationMs / 1000).toFixed(3),
       startEvents: starts,
       finishEvents: finishes,
-      lastEventAtClientMs: Math.max(latestStart.clickedAtClientMs, latestFinish.clickedAtClientMs),
+      abandonEvents: abandons,
+      lastEventAtClientMs: Math.max(latestStart.clickedAtClientMs, lastTerminalEvent.clickedAtClientMs),
     };
     runs.push(run);
   });
@@ -65,9 +78,14 @@ export function deriveCourseSummaries(events) {
       courseId: run.courseId,
       courseLabel: run.courseLabel,
       runs: [],
+      abandonedRuns: [],
       lastFinishedAtClientMs: 0,
     };
-    course.runs.push(run);
+    if (run.isAbandoned) {
+      course.abandonedRuns.push(run);
+    } else {
+      course.runs.push(run);
+    }
     course.lastFinishedAtClientMs = Math.max(course.lastFinishedAtClientMs, run.lastEventAtClientMs);
     byCourse.set(run.courseId, course);
   });
@@ -76,10 +94,26 @@ export function deriveCourseSummaries(events) {
     .map((course) => ({
       ...course,
       runs: [...course.runs].sort((a, b) => parseTime(a.durationLabel) - parseTime(b.durationLabel)),
-      startedAtClientMs: course.runs.reduce(
+      abandonedRuns: [...course.abandonedRuns].sort((a, b) => b.lastEventAtClientMs - a.lastEventAtClientMs),
+      abandonSummary: [...course.abandonedRuns].reduce((acc, run) => {
+        const key = run.participantId || run.participantLabel;
+        const existing = acc.get(key) ?? {
+          participantId: run.participantId,
+          participantLabel: run.participantLabel,
+          count: 0,
+        };
+        existing.count += 1;
+        acc.set(key, existing);
+        return acc;
+      }, new Map()),
+      startedAtClientMs: [...course.runs, ...course.abandonedRuns].reduce(
         (min, run) => Math.min(min, run.latestStartAtClientMs ?? Number.POSITIVE_INFINITY),
         Number.POSITIVE_INFINITY,
       ),
+    }))
+    .map((course) => ({
+      ...course,
+      abandonSummary: [...course.abandonSummary.values()].sort((a, b) => b.count - a.count || a.participantLabel.localeCompare(b.participantLabel)),
     }))
     .sort((a, b) => b.lastFinishedAtClientMs - a.lastFinishedAtClientMs);
 }
@@ -88,6 +122,7 @@ export function deriveGeneralRanking(events) {
   const runs = deriveRunsFromEvents(events);
   const courseOrder = new Map(
     [...runs]
+      .filter((run) => !run.isAbandoned)
       .filter((run) => run.courseId)
       .sort((a, b) => (a.latestStartAtClientMs ?? 0) - (b.latestStartAtClientMs ?? 0))
       .reduce((acc, run) => {
@@ -99,6 +134,7 @@ export function deriveGeneralRanking(events) {
   );
 
   return [...runs]
+    .filter((run) => !run.isAbandoned)
     .map((run) => ({
       ...run,
       courseNumber: courseOrder.get(run.courseId) ?? null,

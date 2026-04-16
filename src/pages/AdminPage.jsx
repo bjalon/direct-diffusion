@@ -12,6 +12,7 @@ import {
   approveResultAccessRequest,
   deleteAllowedResultUser,
   rejectResultAccessRequest,
+  releaseStationAsAdmin,
   saveAllowedResultUser,
   subscribeAllowedResultUsers,
   subscribePendingResultAccessRequests,
@@ -236,6 +237,20 @@ export default function AdminPage({ currentUser }) {
     }
   };
 
+  const handleReleaseStation = async (station) => {
+    clearMessages();
+    setBusyKey(`release-station:${station}`);
+    try {
+      log.info('releasing station as admin', { station });
+      await releaseStationAsAdmin(station);
+      setFeedback(`Poste ${station === 'start' ? 'départ' : 'arrivée'} libéré.`);
+    } catch (err) {
+      setError(getErrorLabel(err));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
   return (
     <div className="config-page">
       <section className="config-section">
@@ -423,6 +438,22 @@ export default function AdminPage({ currentUser }) {
         <div className="admin-section-head">
           <h2 className="section-title">Utilisateurs non-OAuth <span className="admin-section-note">(vert départ et rouge arrivée actuels)</span></h2>
           <span className="admin-counter">{allowedResultUsers.length}</span>
+          <div className="admin-actions">
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={!stationAssignments.start?.assignedUid || (busyKey !== '' && busyKey !== 'release-station:start')}
+              onClick={() => handleReleaseStation('start')}
+            >
+              {busyKey === 'release-station:start' ? 'Libération…' : 'Retirer le poste départ'}
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={!stationAssignments.finish?.assignedUid || (busyKey !== '' && busyKey !== 'release-station:finish')}
+              onClick={() => handleReleaseStation('finish')}
+            >
+              {busyKey === 'release-station:finish' ? 'Libération…' : 'Retirer le poste arrivée'}
+            </button>
+          </div>
         </div>
         {allowedResultUsers.length === 0 ? (
           <div className="stream-empty">Aucun utilisateur non-OAuth autorisé.</div>

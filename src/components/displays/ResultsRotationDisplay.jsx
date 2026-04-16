@@ -50,6 +50,7 @@ export default function ResultsRotationDisplay({
       title: course.courseLabel,
       subtitle: 'Course',
       rows: course.runs,
+      abandonSummary: course.abandonSummary,
       isCurrentCourse: activeCourseId === course.courseId,
     }));
 
@@ -74,6 +75,7 @@ export default function ResultsRotationDisplay({
               participantLabel: 'En attente du prochain départ',
               durationLabel: '—',
             }],
+        abandonSummary: [],
         isCurrentCourse: true,
       });
     }
@@ -236,6 +238,17 @@ export default function ResultsRotationDisplay({
                   <span className="vd-time">{row.durationLabel}</span>
                 </div>
               ))}
+              {currentOrdered.type === 'course' && currentOrdered.abandonSummary?.length > 0 && (
+                <div className="vd-abandon-block">
+                  <div className="vd-abandon-title">Abandons</div>
+                  {currentOrdered.abandonSummary.map((entry) => (
+                    <div key={entry.participantId ?? entry.participantLabel} className="vd-abandon-row">
+                      <span className="vd-name">{entry.participantLabel}</span>
+                      <span className="vd-abandon-count">{entry.count}x</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -3,6 +3,7 @@ import { signInAnonymously } from 'firebase/auth';
 import { auth } from '../firebase';
 import { subscribeParticipants } from '../firebase/participants';
 import {
+  abandonCurrentCompetitor,
   armCurrentCompetitor,
   cancelCurrentCompetitor,
   claimStation,
@@ -439,6 +440,7 @@ function StartStationView({
   const ownsCurrent = currentCompetitor?.selectedByUid === actor.uid;
   const isArmed = ownsCurrent && currentCompetitor?.status === 'armed';
   const isRunning = currentCompetitor?.status === 'running';
+  const hasBufferedStart = startBuffer.length > 0;
   const canChangeCourse = !currentCompetitor;
   const [emailPopoverOpen, setEmailPopoverOpen] = useState(false);
   const currentCourseSummary = useMemo(
@@ -448,6 +450,14 @@ function StartStationView({
   const participantCounts = useMemo(
     () => (currentCourseSummary?.runs ?? []).reduce((acc, run) => {
       acc[run.participantId] = (acc[run.participantId] || 0) + 1;
+      return acc;
+    }, {}),
+    [currentCourseSummary],
+  );
+  const participantAbandonCounts = useMemo(
+    () => (currentCourseSummary?.abandonSummary ?? []).reduce((acc, entry) => {
+      if (!entry.participantId) return acc;
+      acc[entry.participantId] = entry.count;
       return acc;
     }, {}),
     [currentCourseSummary],
@@ -666,9 +676,16 @@ function StartStationView({
               }}
             >
               <span>{busyAction === `arm:${participant.id}` ? 'Préparation…' : participant.label}</span>
-              {participantCounts[participant.id] ? (
-                <span className="results-participant-pill">{participantCounts[participant.id]}</span>
-              ) : null}
+              <span className="results-participant-pills">
+                {participantCounts[participant.id] ? (
+                  <span className="results-participant-pill">{participantCounts[participant.id]}</span>
+                ) : null}
+                {participantAbandonCounts[participant.id] ? (
+                  <span className="results-participant-pill results-participant-pill--danger">
+                    {participantAbandonCounts[participant.id]}
+                  </span>
+                ) : null}
+              </span>
             </button>
           ))}
         </div>
@@ -689,9 +706,38 @@ function StartStationView({
           <div className="results-status-line">Start ID: <span className="admin-uid">{currentCompetitor.startId}</span></div>
           <div className="results-status-line">Départs en mémoire: {startBuffer.length}</div>
           <div className="results-action-grid">
-            <button className="btn btn-primary results-big-button" onClick={appendStartClick}>
-              Départ
-            </button>
+            {hasBufferedStart && (
+              <button
+                className="btn btn-secondary results-big-button"
+                disabled={busyAction === 'sync'}
+                onClick={async () => {
+                  log.info('syncing local start buffer', {
+                    runId: currentCompetitor.runId,
+                    clickCount: startBuffer.length,
+                    actorUid: actor.uid,
+                  });
+                  setBusyAction('sync');
+                  setActionError('');
+                  try {
+                    await syncStartBuffer({ currentCompetitor, clicks: startBuffer, actor });
+                    clearStartBuffer(currentCompetitor.runId);
+                    setStartBuffer([]);
+                  } catch (error) {
+                    log.error('sync start buffer failed', error);
+                    setActionError(getErrorLabel(error));
+                  } finally {
+                    setBusyAction('');
+                  }
+                }}
+              >
+                {busyAction === 'sync' ? 'Synchronisation…' : 'Suivant'}
+              </button>
+            )}
+            {!hasBufferedStart && (
+              <button className="btn btn-primary results-big-button" onClick={appendStartClick}>
+                Départ
+              </button>
+            )}
             <button
               className="btn btn-danger results-big-button"
               disabled={busyAction === 'cancel'}
@@ -717,33 +763,6 @@ function StartStationView({
               {busyAction === 'cancel' ? 'Annulation…' : 'Annuler'}
             </button>
           </div>
-          {startBuffer.length > 0 && (
-            <button
-              className="btn btn-secondary results-next-button"
-              disabled={busyAction === 'sync'}
-              onClick={async () => {
-                log.info('syncing local start buffer', {
-                  runId: currentCompetitor.runId,
-                  clickCount: startBuffer.length,
-                  actorUid: actor.uid,
-                });
-                setBusyAction('sync');
-                setActionError('');
-                try {
-                  await syncStartBuffer({ currentCompetitor, clicks: startBuffer, actor });
-                  clearStartBuffer(currentCompetitor.runId);
-                  setStartBuffer([]);
-                } catch (error) {
-                  log.error('sync start buffer failed', error);
-                  setActionError(getErrorLabel(error));
-                } finally {
-                  setBusyAction('');
-                }
-              }}
-            >
-              {busyAction === 'sync' ? 'Synchronisation…' : 'Suivant'}
-            </button>
-          )}
         </div>
       )}
 
@@ -807,6 +826,11 @@ function FinishStationView({
   onReleaseStation,
   onLogout,
 }) {
+  const startClickCount = Array.isArray(currentCompetitor?.pendingStartClicks)
+    ? currentCompetitor.pendingStartClicks.length
+    : 0;
+  const canFinishCurrent = startClickCount > 0 || Number.isFinite(currentCompetitor?.latestStartAtClientMs);
+
   return (
     <ResultsShell title="Poste arrivée" subtitle={actor.email || 'poste anonyme'}>
       <StationToolbar onReleaseStation={onReleaseStation} onLogout={onLogout} />
@@ -824,32 +848,66 @@ function FinishStationView({
           <div className="results-big-name">{currentCompetitor.participantLabel}</div>
           <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
           <div className="results-status-line">Start ID: <span className="admin-uid">{currentCompetitor.startId}</span></div>
-          <p className="login-subtitle">Appuyez dès que le concurrent franchit l’arrivée.</p>
-          <button
-            className="btn btn-primary results-big-button results-big-button--success"
-            disabled={busyAction === 'finish'}
-            onClick={async () => {
-              log.info('finish click triggered', {
-                runId: currentCompetitor?.runId,
-                actorUid: actor.uid,
-              });
-              setBusyAction('finish');
-              setActionError('');
-              try {
-                await completeCurrentCompetitor({
-                  actor,
-                  click: createClickEntry(),
-                });
-              } catch (error) {
-                log.error('finish click failed', error);
-                setActionError(getErrorLabel(error));
-              } finally {
-                setBusyAction('');
-              }
-            }}
-          >
-            {busyAction === 'finish' ? 'Envoi…' : 'Arrivé'}
-          </button>
+          {!canFinishCurrent && (
+            <p className="login-subtitle">En attente du clic départ avant d’autoriser l’arrivée.</p>
+          )}
+          {canFinishCurrent && (
+            <>
+              <p className="login-subtitle">Appuyez dès que le concurrent franchit l’arrivée.</p>
+              <div className="results-action-grid">
+                <button
+                  className="btn btn-primary results-big-button results-big-button--success"
+                  disabled={busyAction === 'finish' || busyAction === 'abandon'}
+                  onClick={async () => {
+                    log.info('finish click triggered', {
+                      runId: currentCompetitor?.runId,
+                      actorUid: actor.uid,
+                    });
+                    setBusyAction('finish');
+                    setActionError('');
+                    try {
+                      await completeCurrentCompetitor({
+                        actor,
+                        click: createClickEntry(),
+                      });
+                    } catch (error) {
+                      log.error('finish click failed', error);
+                      setActionError(getErrorLabel(error));
+                    } finally {
+                      setBusyAction('');
+                    }
+                  }}
+                >
+                  {busyAction === 'finish' ? 'Envoi…' : 'Arrivé'}
+                </button>
+                <button
+                  className="btn btn-danger results-big-button"
+                  disabled={busyAction === 'finish' || busyAction === 'abandon'}
+                  onClick={async () => {
+                    log.info('abandon click triggered', {
+                      runId: currentCompetitor?.runId,
+                      actorUid: actor.uid,
+                    });
+                    setBusyAction('abandon');
+                    setActionError('');
+                    try {
+                      await abandonCurrentCompetitor({
+                        actor,
+                        click: createClickEntry(),
+                      });
+                    } catch (error) {
+                      log.error('abandon click failed', error);
+                      setActionError(getErrorLabel(error));
+                    } finally {
+                      setBusyAction('');
+                    }
+                  }}
+                >
+                  {busyAction === 'abandon' ? 'Envoi…' : 'Abandonné'}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </ResultsShell>
