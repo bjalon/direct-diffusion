@@ -12,7 +12,7 @@ import { db } from '../firebase';
 const ALLOWED_USERS = collection(db, 'allowedUsers');
 const ACCESS_REQUESTS = collection(db, 'accessRequests');
 
-export const ADMIN_ROLE_KEYS = ['administration', 'admin_flux', 'results'];
+export const ADMIN_ROLE_KEYS = ['administration', 'admin_flux', 'participants', 'results'];
 
 function mapSnapshot(snap) {
   return snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
@@ -47,6 +47,7 @@ export function requestAccess(user) {
     {
       email,
       displayName: user.displayName ?? '',
+      signInProvider: user?.providerData?.[0]?.providerId ?? '',
       status: 'pending',
       requestedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),

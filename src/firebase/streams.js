@@ -3,7 +3,7 @@ import { db } from '../firebase';
 
 /**
  * Returns the user's roles document if they are in allowedUsers, or null.
- * The document fields: { admin_flux?: true, results?: true }
+ * The document fields: { administration?: true, admin_flux?: true, participants?: true, results?: true }
  * Mere existence = basic access.
  */
 export async function getUserRoles(email) {

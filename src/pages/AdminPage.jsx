@@ -12,12 +12,14 @@ import {
 const ROLE_LABELS = {
   administration: 'Administration',
   admin_flux: 'Flux',
+  participants: 'Participants',
   results: 'Résultats',
 };
 
 const DEFAULT_NEW_USER_ROLES = {
   administration: false,
   admin_flux: false,
+  participants: false,
   results: false,
 };
 
@@ -107,7 +109,12 @@ export default function AdminPage({ currentUser }) {
     clearMessages();
     setBusyKey(`approve:${email}`);
     try {
-      await approveAccessRequest(email, { administration: false, admin_flux: false, results: false });
+      await approveAccessRequest(email, {
+        administration: false,
+        admin_flux: false,
+        participants: false,
+        results: false,
+      });
       setFeedback(`Demande approuvée pour ${email}.`);
     } catch (err) {
       setError(getErrorLabel(err));
@@ -164,6 +171,11 @@ export default function AdminPage({ currentUser }) {
                   <div className="admin-subline">
                     Demandé {formatTimestamp(request.requestedAt)}
                   </div>
+                  {request.signInProvider && (
+                    <div className="admin-subline">
+                      Connexion: {getProviderLabel(request.signInProvider)}
+                    </div>
+                  )}
                 </div>
                 <div className="admin-actions">
                   <button
@@ -310,4 +322,10 @@ function formatTimestamp(value) {
 
 function getErrorLabel(error) {
   return error?.code ? `Erreur : ${error.code}` : "Une erreur est survenue.";
+}
+
+function getProviderLabel(providerId) {
+  if (providerId === 'google.com') return 'Google OAuth';
+  if (providerId === 'password') return 'Lien email';
+  return providerId;
 }

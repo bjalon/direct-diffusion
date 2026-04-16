@@ -44,7 +44,7 @@ function normaliseStream(raw) {
 export default function App() {
   // null = checking auth, false = not authenticated, object = authenticated user
   const [user, setUser] = useState(null);
-  // null = checking, false = denied, object = roles doc { admin_flux?, results? }
+  // null = checking, false = denied, object = roles doc
   const [roles, setRoles] = useState(null);
 
   // Layout + slot assignments (persisted to localStorage)
@@ -108,12 +108,19 @@ export default function App() {
     saveConfig(nextLayoutSlots);
 
     // Persist streams only if user has stream admin role
-    if (nextStreams !== streams && roles?.admin_flux) {
+    if (nextStreams !== streams && permissions?.admin_flux) {
       saveStreams(nextStreams);
     }
   };
 
   const handleLogout = () => signOut(auth);
+  const isGoogleUser = user && hasGoogleProvider(user);
+  const permissions = roles && roles !== false ? {
+    administration: !!roles.administration && isGoogleUser,
+    admin_flux: !!roles.admin_flux && isGoogleUser,
+    participants: !!roles.participants && isGoogleUser,
+    results: !!roles.results,
+  } : null;
 
   // ── Loading ─────────────────────────────────────────────────────────────────
   if (user === null || (user && roles === null)) {
@@ -155,24 +162,28 @@ export default function App() {
   return (
     <HashRouter>
       <div className="app-root">
-        <NavBar user={user} onLogout={handleLogout} roles={roles} />
+        <NavBar user={user} onLogout={handleLogout} roles={permissions} />
         <main className="app-main">
           <Routes>
             <Route path="/" element={<DisplayPage config={config} />} />
             <Route path="/config" element={
-              <ConfigPage config={config} onUpdate={updateConfig} canEditStreams={!!roles?.admin_flux} />
+              <ConfigPage config={config} onUpdate={updateConfig} canEditStreams={!!permissions?.admin_flux} />
             } />
-            <Route path="/participants" element={<ParticipantsPage canEdit={!!roles?.results} />} />
-            <Route path="/results" element={<ResultsPage canEdit={!!roles?.results} />} />
+            <Route path="/participants" element={<ParticipantsPage canEdit={!!permissions?.participants} />} />
+            <Route path="/results" element={<ResultsPage canEdit={!!permissions?.results} />} />
             <Route
               path="/admin"
-              element={roles?.administration ? <AdminPage currentUser={user} /> : <Navigate to="/" replace />}
+              element={permissions?.administration ? <AdminPage currentUser={user} /> : <Navigate to="/" replace />}
             />
           </Routes>
         </main>
       </div>
     </HashRouter>
   );
+}
+
+function hasGoogleProvider(user) {
+  return user?.providerData?.some((provider) => provider.providerId === 'google.com') ?? false;
 }
 
 function DeniedAccessCard({ user, requestState, onLogout, onRequestAccess }) {

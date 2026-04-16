@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 const ALL_LINKS = [
   { to: '/',             label: 'Affichage',    role: null },
   { to: '/config',       label: 'Flux',         role: null },
-  { to: '/participants', label: 'Participants',  role: 'results' },
+  { to: '/participants', label: 'Participants', role: 'participants' },
   { to: '/results',      label: 'Résultats',    role: 'results' },
   { to: '/admin',        label: 'Admin',        role: 'administration' },
 ];

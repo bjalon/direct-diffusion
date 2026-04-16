@@ -131,14 +131,23 @@ Each document may contain these role flags:
 
 - `administration`
 - `admin_flux`
+- `participants`
 - `results`
 
 Behavior:
 
 - document existence grants base application access
-- `admin_flux` allows editing the stream configuration stored in Firestore
-- `results` allows editing participants, races, and race results
 - `administration` allows access to the admin page and modification of `allowedUsers`
+- `admin_flux` allows editing the stream configuration stored in Firestore
+- `participants` allows editing the participants collection
+- `results` allows editing races and race results
+
+Sensitive roles are restricted to Google OAuth in Firestore rules:
+
+- `administration` requires the `google.com` sign-in provider
+- `admin_flux` requires the `google.com` sign-in provider
+- `participants` requires the `google.com` sign-in provider
+- `results` does not require Google OAuth
 
 ## Access Requests
 
