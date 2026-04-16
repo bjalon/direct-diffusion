@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { GoogleAuthProvider, signInAnonymously, signInWithPopup } from 'firebase/auth';
-import { useNavigate } from 'react-router-dom';
 import { auth } from '../firebase';
 import { submitResultAccessRequest } from '../firebase/results';
 import { createLogger } from '../utils/logger';
@@ -8,8 +7,7 @@ import { createLogger } from '../utils/logger';
 const googleProvider = new GoogleAuthProvider();
 const log = createLogger('LoginPage');
 
-export default function LoginPage() {
-  const navigate = useNavigate();
+export default function LoginPage({ user, deviceAccess, deviceRequest }) {
   const [status, setStatus] = useState('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [requestEmail, setRequestEmail] = useState('');
@@ -58,12 +56,31 @@ export default function LoginPage() {
         email: requestEmail.trim().toLowerCase(),
       });
       setRequestStatus('sent');
-      navigate('/results');
     } catch (err) {
       log.error('lightweight access request failed', err);
       setRequestStatus('error');
       setRequestError(getErrorLabel(err.code || err.message));
     }
+  }
+
+  const waitingEntry = deviceRequest || (deviceAccess && !deviceAccess.tv ? deviceAccess : null);
+  if (user?.isAnonymous && waitingEntry) {
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <div className="login-logo" aria-hidden>DD</div>
+          <h1 className="login-title">Demande en attente</h1>
+          <p className="login-subtitle">
+            Votre demande d&apos;accès léger a bien été enregistrée.
+          </p>
+          <div className="results-status-card">
+            <div className="results-status-line"><strong>Email:</strong> {waitingEntry.email || '—'}</div>
+            <div className="results-status-line"><strong>UID:</strong> {user.uid}</div>
+            <div className="results-status-line"><strong>Statut:</strong> {statusLabel(waitingEntry.status)}</div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -93,7 +110,7 @@ export default function LoginPage() {
 
         <form className="login-form" onSubmit={handleRequestAccess}>
           <p className="login-subtitle">
-            Demander un accès opérateur en saisissant simplement votre email.
+            Demander un accès léger en saisissant simplement votre email.
           </p>
           <input
             type="email"
@@ -115,6 +132,12 @@ export default function LoginPage() {
       </div>
     </div>
   );
+}
+
+function statusLabel(status) {
+  if (status === 'approved') return 'Approuvée';
+  if (status === 'rejected') return 'Refusée';
+  return 'En attente';
 }
 
 function getErrorLabel(code) {

@@ -244,7 +244,17 @@ export default function ResultsPage({ user, onLogout }) {
   }
 
   if (!hasResultAccess) {
-    const pendingLike = resultRequest || resultAccess;
+    if (resultAccess?.tv) {
+      return (
+        <ResultsErrorCard
+          title="Accès TV uniquement"
+          message="Ce compte léger peut accéder à l’affichage, aux flux et aux layouts, mais pas à la saisie résultats."
+          onLogout={onLogout}
+        />
+      );
+    }
+
+    const pendingLike = resultRequest || (resultAccess && !resultAccess.tv ? resultAccess : null);
     if (pendingLike) {
       log.info('rendering pending result access screen', pendingLike);
       return (

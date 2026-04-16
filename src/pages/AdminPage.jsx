@@ -26,11 +26,12 @@ const NORMAL_ROLE_LABELS = {
   participants: 'Participants',
 };
 
-const RESULT_ROLE_KEYS = ['results_start', 'results_finish'];
+const LIGHT_ROLE_KEYS = ['results_start', 'results_finish', 'tv'];
 
 const RESULT_ROLE_LABELS = {
   results_start: 'Départ',
   results_finish: 'Arrivée',
+  tv: 'TV',
 };
 
 const DEFAULT_NORMAL_ROLES = {
@@ -189,11 +190,23 @@ export default function AdminPage({ currentUser }) {
     const entry = allowedResultUsers.find((user) => user.id === uid);
     if (!entry) return;
 
+    const nextRoles = {
+      ...entry,
+      [role]: checked,
+    };
+    if (role === 'tv' && checked) {
+      nextRoles.results_start = false;
+      nextRoles.results_finish = false;
+    }
+    if ((role === 'results_start' || role === 'results_finish') && checked) {
+      nextRoles.tv = false;
+    }
+
     setBusyKey(`result-role:${uid}:${role}`);
     try {
       log.info('toggling result role', { uid, role, checked });
-      await saveAllowedResultUser(uid, { ...entry, [role]: checked });
-      setFeedback(`Droits résultats mis à jour pour ${entry.email || uid}.`);
+      await saveAllowedResultUser(uid, nextRoles);
+      setFeedback(`Droits légers mis à jour pour ${entry.email || uid}.`);
     } catch (err) {
       setError(getErrorLabel(err));
     } finally {
@@ -221,7 +234,7 @@ export default function AdminPage({ currentUser }) {
         <h2 className="section-title">Administration</h2>
         <p className="hint">
           Les accès Google sensibles sont gérés dans <code>allowedUsers</code>. Les opérateurs
-          résultats sont gérés par <code>uid</code> dans <code>allowedResultUsers</code>.
+          résultats et TV non-OAuth sont gérés par <code>uid</code> dans <code>allowedResultUsers</code>.
         </p>
         {currentUserEntry && (
           <div className="admin-banner">
@@ -400,11 +413,11 @@ export default function AdminPage({ currentUser }) {
 
       <section className="config-section">
         <div className="admin-section-head">
-          <h2 className="section-title">Opérateurs Résultats</h2>
+          <h2 className="section-title">Utilisateurs non-OAuth</h2>
           <span className="admin-counter">{allowedResultUsers.length}</span>
         </div>
         {allowedResultUsers.length === 0 ? (
-          <div className="stream-empty">Aucun opérateur résultats autorisé.</div>
+          <div className="stream-empty">Aucun utilisateur non-OAuth autorisé.</div>
         ) : (
           <div className="admin-table-wrap">
             <table className="admin-table">
@@ -412,7 +425,7 @@ export default function AdminPage({ currentUser }) {
                 <tr>
                   <th>Email</th>
                   <th>UID</th>
-                  {RESULT_ROLE_KEYS.map((role) => <th key={role}>{RESULT_ROLE_LABELS[role]}</th>)}
+                  {LIGHT_ROLE_KEYS.map((role) => <th key={role}>{RESULT_ROLE_LABELS[role]}</th>)}
                   <th>Mise à jour</th>
                   <th></th>
                 </tr>
@@ -424,7 +437,7 @@ export default function AdminPage({ currentUser }) {
                       <div className="admin-email">{entry.email || '—'}</div>
                     </td>
                     <td className="admin-uid">{entry.uid || entry.id}</td>
-                    {RESULT_ROLE_KEYS.map((role) => {
+                    {LIGHT_ROLE_KEYS.map((role) => {
                       const key = `result-role:${entry.id}:${role}`;
                       return (
                         <td key={role} className="admin-cell-center">

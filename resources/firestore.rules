@@ -62,6 +62,10 @@ service cloud.firestore {
       return hasResultRole('results_start') || hasResultRole('results_finish');
     }
 
+    function hasTvAccess() {
+      return hasResultRole('tv');
+    }
+
     function canManageStation(stationId) {
       return (stationId == 'start' && hasResultRole('results_start'))
              || (stationId == 'finish' && hasResultRole('results_finish'));
@@ -80,6 +84,20 @@ service cloud.firestore {
              && exists(/databases/$(database)/documents/resultStations/$(stationId))
              && resource.data.assignedUid == request.auth.uid
              && request.resource.data.assignedUid == null;
+    }
+
+    function hasOnlyTvRole(data) {
+      return data.get('tv', false) == true
+             && data.get('results_start', false) == false
+             && data.get('results_finish', false) == false;
+    }
+
+    function hasOnlyResultsRoles(data) {
+      return data.get('tv', false) == false;
+    }
+
+    function validLightRoleCombination(data) {
+      return hasOnlyTvRole(data) || hasOnlyResultsRoles(data);
     }
 
     match /allowedUsers/{email} {
@@ -101,7 +119,8 @@ service cloud.firestore {
     match /allowedResultUsers/{uid} {
       allow get: if isAdministration() || (isAuthenticated() && uid == request.auth.uid);
       allow list: if isAdministration();
-      allow create, update, delete: if isAdministration();
+      allow create, update: if isAdministration() && validLightRoleCombination(request.resource.data);
+      allow delete: if isAdministration();
     }
 
     match /resultAccessRequests/{uid} {
@@ -115,7 +134,7 @@ service cloud.firestore {
     }
 
     match /resultStations/{stationId} {
-      allow read: if isAdministration() || hasGrantedResultAccess();
+      allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
       allow create, update: if canClaimStation(stationId) || canReleaseStation(stationId);
       allow delete: if isAdministration()
                     || (canManageStation(stationId)
@@ -123,20 +142,20 @@ service cloud.firestore {
     }
 
     match /currentCompetitor/{docId} {
-      allow read: if isAdministration() || hasGrantedResultAccess();
+      allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
       allow create, update: if docId == 'current' && hasResultRole('results_start');
       allow delete: if docId == 'current' && (hasResultRole('results_start') || hasResultRole('results_finish'));
     }
 
     match /resultEvents/{eventId} {
-      allow read: if isAdministration() || hasGrantedResultAccess();
+      allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
       allow create: if hasGrantedResultAccess();
       allow update: if isAdministration();
       allow delete: if false;
     }
 
     match /resultRuns/{runId} {
-      allow read: if isAllowedUser() || hasGrantedResultAccess();
+      allow read: if isAllowedUser() || hasGrantedResultAccess() || hasTvAccess();
       allow create, update: if hasGrantedResultAccess();
       allow delete: if isAdministration();
     }
@@ -146,7 +165,7 @@ service cloud.firestore {
     }
 
     match /config/streams {
-      allow read: if isAllowedUser();
+      allow read: if isAllowedUser() || hasTvAccess();
       allow write: if isAdminFlux();
     }
 

@@ -17,6 +17,7 @@ import LayoutsPage from './pages/LayoutsPage';
 import ResultsAuditPage from './pages/ResultsAuditPage';
 import ResultsPage from './pages/ResultsPage';
 import { BUILTIN_VIRTUAL_STREAM } from './utils/virtualDisplay';
+import { subscribeResultAccess, subscribeResultAccessRequest } from './firebase/results';
 
 function orientationToRotation(orientation) {
   const map = { 'landscape-ccw': -90, 'landscape-cw': 90, landscape: -90, portrait: 0 };
@@ -49,6 +50,8 @@ export default function App() {
   const [layoutSlots, setLayoutSlots] = useState(loadConfig);
   const [streams, setStreams] = useState([]);
   const [accessRequestState, setAccessRequestState] = useState('idle');
+  const [deviceAccess, setDeviceAccess] = useState(null);
+  const [deviceRequest, setDeviceRequest] = useState(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (nextUser) => {
@@ -89,11 +92,32 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (!user || user === false || user.isAnonymous || !roles || roles === false) {
+    if (!user || user === false) {
+      setDeviceAccess(null);
+      return undefined;
+    }
+    return subscribeResultAccess(user.uid, setDeviceAccess);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user || user === false) {
+      setDeviceRequest(null);
+      return undefined;
+    }
+    return subscribeResultAccessRequest(user.uid, setDeviceRequest);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    const canReadStreams = (!user || user === false)
+      ? false
+      : (user.isAnonymous ? !!deviceAccess?.tv : !!(roles && roles !== false));
+
+    if (!canReadStreams) {
       log.debug('skip stream subscription', {
         hasUser: !!user,
         isAnonymous: user?.isAnonymous,
         roles,
+        deviceAccess,
       });
       setStreams([]);
       return;
@@ -115,7 +139,7 @@ export default function App() {
       });
 
     return unsub;
-  }, [user, roles]);
+  }, [user, roles, deviceAccess?.tv]);
 
   if (user === null || (user && user !== false && !user.isAnonymous && roles === null)) {
     return (
@@ -125,11 +149,29 @@ export default function App() {
     );
   }
 
-  const permissions = roles && roles !== false ? {
-    administration: !!roles.administration && hasGoogleProvider(user),
-    admin_flux: !!roles.admin_flux && hasGoogleProvider(user),
-    participants: !!roles.participants && hasGoogleProvider(user),
-  } : null;
+  const permissions = (() => {
+    if (roles && roles !== false) {
+      return {
+        administration: !!roles.administration && hasGoogleProvider(user),
+        admin_flux: !!roles.admin_flux && hasGoogleProvider(user),
+        participants: !!roles.participants && hasGoogleProvider(user),
+        tv: false,
+        identityLabel: user?.email || '',
+      };
+    }
+
+    if (user?.isAnonymous && deviceAccess?.tv) {
+      return {
+        administration: false,
+        admin_flux: false,
+        participants: false,
+        tv: true,
+        identityLabel: deviceAccess.email || user.uid,
+      };
+    }
+
+    return null;
+  })();
 
   const updateConfig = (updater) => {
     const prevFull = { ...layoutSlots, streams };
@@ -171,6 +213,8 @@ export default function App() {
         updateConfig={updateConfig}
         accessRequestState={accessRequestState}
         setAccessRequestState={setAccessRequestState}
+        deviceAccess={deviceAccess}
+        deviceRequest={deviceRequest}
       />
     </HashRouter>
   );
@@ -183,14 +227,16 @@ function AppShell({
   updateConfig,
   accessRequestState,
   setAccessRequestState,
+  deviceAccess,
+  deviceRequest,
 }) {
   const { pathname } = useLocation();
   const handleLogout = () => signOut(auth);
-  const showNavbar = pathname !== '/results' && !!user && user !== false && !user.isAnonymous && !!permissions;
+  const showNavbar = pathname !== '/results' && !!user && user !== false && !!permissions;
 
   return (
     <div className="app-root">
-      {showNavbar && <NavBar user={user} onLogout={handleLogout} roles={permissions} />}
+      {showNavbar && <NavBar user={user} onLogout={handleLogout} roles={permissions} identityLabel={permissions?.identityLabel} />}
       <main className="app-main">
         <Routes>
           <Route
@@ -202,6 +248,8 @@ function AppShell({
                 accessRequestState={accessRequestState}
                 setAccessRequestState={setAccessRequestState}
                 onLogout={handleLogout}
+                deviceAccess={deviceAccess}
+                deviceRequest={deviceRequest}
               >
                 <DisplayPage config={config} />
               </RegularRoute>
@@ -216,6 +264,8 @@ function AppShell({
                 accessRequestState={accessRequestState}
                 setAccessRequestState={setAccessRequestState}
                 onLogout={handleLogout}
+                deviceAccess={deviceAccess}
+                deviceRequest={deviceRequest}
               >
                 <ConfigPage config={config} onUpdate={updateConfig} canEditStreams={!!permissions?.admin_flux} />
               </RegularRoute>
@@ -231,6 +281,8 @@ function AppShell({
                 accessRequestState={accessRequestState}
                 setAccessRequestState={setAccessRequestState}
                 onLogout={handleLogout}
+                deviceAccess={deviceAccess}
+                deviceRequest={deviceRequest}
               >
                 <ParticipantsPage canEdit={!!permissions?.participants} />
               </RegularRoute>
@@ -245,6 +297,8 @@ function AppShell({
                 accessRequestState={accessRequestState}
                 setAccessRequestState={setAccessRequestState}
                 onLogout={handleLogout}
+                deviceAccess={deviceAccess}
+                deviceRequest={deviceRequest}
               >
                 <LayoutsPage currentLayoutId={config.layout} />
               </RegularRoute>
@@ -260,6 +314,8 @@ function AppShell({
                 accessRequestState={accessRequestState}
                 setAccessRequestState={setAccessRequestState}
                 onLogout={handleLogout}
+                deviceAccess={deviceAccess}
+                deviceRequest={deviceRequest}
               >
                 <AdminPage currentUser={user} />
               </RegularRoute>
@@ -275,6 +331,8 @@ function AppShell({
                 accessRequestState={accessRequestState}
                 setAccessRequestState={setAccessRequestState}
                 onLogout={handleLogout}
+                deviceAccess={deviceAccess}
+                deviceRequest={deviceRequest}
               >
                 <ResultsAuditPage />
               </RegularRoute>
@@ -296,9 +354,15 @@ function RegularRoute({
   accessRequestState,
   setAccessRequestState,
   onLogout,
+  deviceAccess,
+  deviceRequest,
 }) {
-  if (user === false || user?.isAnonymous) {
-    return <LoginPage />;
+  if (user === false) {
+    return <LoginPage user={user} deviceAccess={deviceAccess} deviceRequest={deviceRequest} />;
+  }
+
+  if (user?.isAnonymous && !permissions?.tv) {
+    return <LoginPage user={user} deviceAccess={deviceAccess} deviceRequest={deviceRequest} />;
   }
 
   if (!permissions) {

@@ -10,7 +10,7 @@ const ALL_LINKS = [
   { to: '/results-admin', label: 'Résultats',   role: 'administration' },
 ];
 
-export default function NavBar({ user, onLogout, roles }) {
+export default function NavBar({ user, onLogout, roles, identityLabel }) {
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
 
@@ -33,7 +33,7 @@ export default function NavBar({ user, onLogout, roles }) {
       </div>
 
       <div className="navbar-right">
-        <span className="navbar-email">{user?.email}</span>
+        <span className="navbar-email">{identityLabel || user?.email}</span>
         <button className="btn btn-secondary btn-sm navbar-logout" onClick={onLogout}>
           Déconnexion
         </button>

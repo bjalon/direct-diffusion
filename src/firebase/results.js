@@ -26,6 +26,15 @@ const RESULT_RUN = (runId) => doc(db, 'resultRuns', runId);
 const CLOCK_CHECK = (uid) => doc(db, 'clockChecks', uid);
 const log = createLogger('firebase/results');
 
+function normalizeLightRoles(data) {
+  const tv = !!data.tv;
+  return {
+    results_start: tv ? false : !!data.results_start,
+    results_finish: tv ? false : !!data.results_finish,
+    tv,
+  };
+}
+
 export function subscribeResultAccess(uid, onData) {
   if (!uid) {
     onData(null);
@@ -117,6 +126,7 @@ export function approveResultAccessRequest(uid) {
         email: (request.email ?? '').trim().toLowerCase(),
         results_start: false,
         results_finish: false,
+        tv: false,
         approvedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       },
@@ -140,13 +150,13 @@ export function rejectResultAccessRequest(uid) {
 
 export function saveAllowedResultUser(uid, data) {
   log.info('saveAllowedResultUser', { uid, data });
+  const roles = normalizeLightRoles(data);
   return setDoc(
     RESULT_ACCESS(uid),
     {
       uid,
       email: (data.email ?? '').trim().toLowerCase(),
-      results_start: !!data.results_start,
-      results_finish: !!data.results_finish,
+      ...roles,
       updatedAt: serverTimestamp(),
     },
     { merge: true },
