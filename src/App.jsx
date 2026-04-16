@@ -1,29 +1,27 @@
-import { useState, useEffect } from 'react';
-import { HashRouter, Navigate, Routes, Route } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
-import { subscribeStreams, saveStreams, seedStreamsIfEmpty, getUserRoles } from './firebase/streams';
 import { requestAccess } from './firebase/admin';
-import { loadConfig, saveConfig } from './utils/storage';
-import { buildSrcFromUrl } from './utils/iframeParser';
+import { getUserRoles, saveStreams, seedStreamsIfEmpty, subscribeStreams } from './firebase/streams';
 import NavBar from './components/NavBar';
-import DisplayPage from './pages/DisplayPage';
+import { buildSrcFromUrl } from './utils/iframeParser';
+import { loadConfig, saveConfig } from './utils/storage';
+import AdminPage from './pages/AdminPage';
 import ConfigPage from './pages/ConfigPage';
+import DisplayPage from './pages/DisplayPage';
+import LoginPage from './pages/LoginPage';
 import ParticipantsPage from './pages/ParticipantsPage';
 import ResultsPage from './pages/ResultsPage';
-import AdminPage from './pages/AdminPage';
-import LoginPage from './pages/LoginPage';
-
-// ── Stream normalisation (used to seed Firestore from streams.json) ───────────
 
 function orientationToRotation(orientation) {
-  const map = { 'landscape-ccw': -90, 'landscape-cw': 90, 'landscape': -90, 'portrait': 0 };
+  const map = { 'landscape-ccw': -90, 'landscape-cw': 90, landscape: -90, portrait: 0 };
   return map[orientation] ?? 0;
 }
 
 function normaliseStream(raw) {
   if (!raw || !raw.id) return null;
-  const origW = raw.originalWidth  ?? 267;
+  const origW = raw.originalWidth ?? 267;
   const origH = raw.originalHeight ?? 476;
   const rotation = typeof raw.rotation === 'number'
     ? raw.rotation
@@ -39,52 +37,46 @@ function normaliseStream(raw) {
   return null;
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
-
 export default function App() {
-  // null = checking auth, false = not authenticated, object = authenticated user
   const [user, setUser] = useState(null);
-  // null = checking, false = denied, object = roles doc
   const [roles, setRoles] = useState(null);
-
-  // Layout + slot assignments (persisted to localStorage)
   const [layoutSlots, setLayoutSlots] = useState(loadConfig);
-
-  // Streams from Firestore
   const [streams, setStreams] = useState([]);
   const [accessRequestState, setAccessRequestState] = useState('idle');
 
-  // ── Auth state ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u ?? false);
-      if (!u) setRoles(null);
+    const unsub = onAuthStateChanged(auth, (nextUser) => {
+      setUser(nextUser ?? false);
       setAccessRequestState('idle');
+      if (!nextUser || nextUser.isAnonymous) {
+        setRoles(false);
+      }
     });
     return unsub;
   }, []);
 
-  // ── Authorization + roles ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!user) return;
+    if (!user || user === false || user.isAnonymous) {
+      setRoles(false);
+      return;
+    }
+
+    setRoles(null);
     getUserRoles(user.email)
-      .then((r) => setRoles(r ?? false))
+      .then((nextRoles) => setRoles(nextRoles ?? false))
       .catch(() => setRoles(false));
   }, [user]);
 
-  // ── Firestore subscription + seed (only when authorized) ──────────────────
   useEffect(() => {
-    if (!user || !roles || roles === false) {
+    if (!user || user === false || user.isAnonymous || !roles || roles === false) {
       setStreams([]);
       return;
     }
 
-    // Real-time listener
     const unsub = subscribeStreams(setStreams);
 
-    // Seed from public/streams.json if Firestore is empty
     fetch('./streams.json')
-      .then((r) => (r.ok ? r.json() : []))
+      .then((response) => (response.ok ? response.json() : []))
       .then((raw) => {
         if (!Array.isArray(raw) || raw.length === 0) return;
         const normalised = raw.map(normaliseStream).filter(Boolean);
@@ -95,35 +87,7 @@ export default function App() {
     return unsub;
   }, [user, roles]);
 
-  // ── Config updater ──────────────────────────────────────────────────────────
-  // Accepts the same (updater | nextConfig) signature as before.
-  // Streams → Firestore ; layout+slots → localStorage.
-  const updateConfig = (updater) => {
-    const prevFull = { ...layoutSlots, streams };
-    const next = typeof updater === 'function' ? updater(prevFull) : updater;
-    const { streams: nextStreams, ...nextLayoutSlots } = next;
-
-    // Persist layout+slots
-    setLayoutSlots(nextLayoutSlots);
-    saveConfig(nextLayoutSlots);
-
-    // Persist streams only if user has stream admin role
-    if (nextStreams !== streams && permissions?.admin_flux) {
-      saveStreams(nextStreams);
-    }
-  };
-
-  const handleLogout = () => signOut(auth);
-  const isGoogleUser = user && hasGoogleProvider(user);
-  const permissions = roles && roles !== false ? {
-    administration: !!roles.administration && isGoogleUser,
-    admin_flux: !!roles.admin_flux && isGoogleUser,
-    participants: !!roles.participants && isGoogleUser,
-    results: !!roles.results,
-  } : null;
-
-  // ── Loading ─────────────────────────────────────────────────────────────────
-  if (user === null || (user && roles === null)) {
+  if (user === null || (user && user !== false && !user.isAnonymous && roles === null)) {
     return (
       <div className="app-loading">
         <div className="login-spinner" />
@@ -131,18 +95,141 @@ export default function App() {
     );
   }
 
-  // ── Not authenticated ───────────────────────────────────────────────────────
-  if (user === false) {
+  const permissions = roles && roles !== false ? {
+    administration: !!roles.administration && hasGoogleProvider(user),
+    admin_flux: !!roles.admin_flux && hasGoogleProvider(user),
+    participants: !!roles.participants && hasGoogleProvider(user),
+  } : null;
+
+  const updateConfig = (updater) => {
+    const prevFull = { ...layoutSlots, streams };
+    const next = typeof updater === 'function' ? updater(prevFull) : updater;
+    const { streams: nextStreams, ...nextLayoutSlots } = next;
+
+    setLayoutSlots(nextLayoutSlots);
+    saveConfig(nextLayoutSlots);
+
+    if (nextStreams !== streams && permissions?.admin_flux) {
+      saveStreams(nextStreams);
+    }
+  };
+
+  return (
+    <HashRouter>
+      <AppShell
+        user={user}
+        permissions={permissions}
+        config={{ ...layoutSlots, streams }}
+        updateConfig={updateConfig}
+        accessRequestState={accessRequestState}
+        setAccessRequestState={setAccessRequestState}
+      />
+    </HashRouter>
+  );
+}
+
+function AppShell({
+  user,
+  permissions,
+  config,
+  updateConfig,
+  accessRequestState,
+  setAccessRequestState,
+}) {
+  const { pathname } = useLocation();
+  const handleLogout = () => signOut(auth);
+  const showNavbar = pathname !== '/results' && !!user && user !== false && !user.isAnonymous && !!permissions;
+
+  return (
+    <div className="app-root">
+      {showNavbar && <NavBar user={user} onLogout={handleLogout} roles={permissions} />}
+      <main className="app-main">
+        <Routes>
+          <Route
+            path="/"
+            element={(
+              <RegularRoute
+                user={user}
+                permissions={permissions}
+                accessRequestState={accessRequestState}
+                setAccessRequestState={setAccessRequestState}
+                onLogout={handleLogout}
+              >
+                <DisplayPage config={config} />
+              </RegularRoute>
+            )}
+          />
+          <Route
+            path="/config"
+            element={(
+              <RegularRoute
+                user={user}
+                permissions={permissions}
+                accessRequestState={accessRequestState}
+                setAccessRequestState={setAccessRequestState}
+                onLogout={handleLogout}
+              >
+                <ConfigPage config={config} onUpdate={updateConfig} canEditStreams={!!permissions?.admin_flux} />
+              </RegularRoute>
+            )}
+          />
+          <Route
+            path="/participants"
+            element={(
+              <RegularRoute
+                user={user}
+                permissions={permissions}
+                requiredRole="participants"
+                accessRequestState={accessRequestState}
+                setAccessRequestState={setAccessRequestState}
+                onLogout={handleLogout}
+              >
+                <ParticipantsPage canEdit={!!permissions?.participants} />
+              </RegularRoute>
+            )}
+          />
+          <Route
+            path="/admin"
+            element={(
+              <RegularRoute
+                user={user}
+                permissions={permissions}
+                requiredRole="administration"
+                accessRequestState={accessRequestState}
+                setAccessRequestState={setAccessRequestState}
+                onLogout={handleLogout}
+              >
+                <AdminPage currentUser={user} />
+              </RegularRoute>
+            )}
+          />
+          <Route path="/results" element={<ResultsPage user={user} onLogout={handleLogout} />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
+function RegularRoute({
+  user,
+  permissions,
+  requiredRole,
+  children,
+  accessRequestState,
+  setAccessRequestState,
+  onLogout,
+}) {
+  if (user === false || user?.isAnonymous) {
     return <LoginPage />;
   }
 
-  // ── Not authorized ──────────────────────────────────────────────────────────
-  if (roles === false) {
+  if (!permissions) {
     return (
       <DeniedAccessCard
         user={user}
         requestState={accessRequestState}
-        onLogout={handleLogout}
+        onLogout={onLogout}
         onRequestAccess={async () => {
           setAccessRequestState('sending');
           try {
@@ -156,30 +243,11 @@ export default function App() {
     );
   }
 
-  // ── Authenticated ───────────────────────────────────────────────────────────
-  const config = { ...layoutSlots, streams };
+  if (requiredRole && !permissions[requiredRole]) {
+    return <Navigate to="/" replace />;
+  }
 
-  return (
-    <HashRouter>
-      <div className="app-root">
-        <NavBar user={user} onLogout={handleLogout} roles={permissions} />
-        <main className="app-main">
-          <Routes>
-            <Route path="/" element={<DisplayPage config={config} />} />
-            <Route path="/config" element={
-              <ConfigPage config={config} onUpdate={updateConfig} canEditStreams={!!permissions?.admin_flux} />
-            } />
-            <Route path="/participants" element={<ParticipantsPage canEdit={!!permissions?.participants} />} />
-            <Route path="/results" element={<ResultsPage canEdit={!!permissions?.results} />} />
-            <Route
-              path="/admin"
-              element={permissions?.administration ? <AdminPage currentUser={user} /> : <Navigate to="/" replace />}
-            />
-          </Routes>
-        </main>
-      </div>
-    </HashRouter>
-  );
+  return children;
 }
 
 function hasGoogleProvider(user) {
@@ -191,8 +259,7 @@ function DeniedAccessCard({ user, requestState, onLogout, onRequestAccess }) {
     <div className="login-page">
       <div className="login-card">
         <div className="login-icon" style={{ color: 'var(--danger)' }}>
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" strokeWidth="1.5">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <circle cx="12" cy="12" r="10" />
             <line x1="12" y1="8" x2="12" y2="12" />
             <line x1="12" y1="16" x2="12.01" y2="16" />

@@ -12,7 +12,7 @@ import { db } from '../firebase';
 const ALLOWED_USERS = collection(db, 'allowedUsers');
 const ACCESS_REQUESTS = collection(db, 'accessRequests');
 
-export const ADMIN_ROLE_KEYS = ['administration', 'admin_flux', 'participants', 'results'];
+export const ADMIN_ROLE_KEYS = ['administration', 'admin_flux', 'participants'];
 
 function mapSnapshot(snap) {
   return snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));

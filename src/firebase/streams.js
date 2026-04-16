@@ -7,7 +7,7 @@ import { db } from '../firebase';
  * Mere existence = basic access.
  */
 export async function getUserRoles(email) {
-  const snap = await getDoc(doc(db, 'allowedUsers', email));
+  const snap = await getDoc(doc(db, 'allowedUsers', email.trim().toLowerCase()));
   if (!snap.exists()) return null;
   return snap.data();
 }

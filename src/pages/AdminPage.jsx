@@ -8,32 +8,49 @@ import {
   subscribeAccessRequests,
   subscribeAllowedUsers,
 } from '../firebase/admin';
+import {
+  approveResultAccessRequest,
+  deleteAllowedResultUser,
+  rejectResultAccessRequest,
+  saveAllowedResultUser,
+  subscribeAllowedResultUsers,
+  subscribePendingResultAccessRequests,
+} from '../firebase/results';
 
-const ROLE_LABELS = {
+const NORMAL_ROLE_LABELS = {
   administration: 'Administration',
   admin_flux: 'Flux',
   participants: 'Participants',
-  results: 'Résultats',
 };
 
-const DEFAULT_NEW_USER_ROLES = {
+const RESULT_ROLE_KEYS = ['results_start', 'results_finish'];
+
+const RESULT_ROLE_LABELS = {
+  results_start: 'Départ',
+  results_finish: 'Arrivée',
+};
+
+const DEFAULT_NORMAL_ROLES = {
   administration: false,
   admin_flux: false,
   participants: false,
-  results: false,
 };
 
 export default function AdminPage({ currentUser }) {
   const [allowedUsers, setAllowedUsers] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [allowedResultUsers, setAllowedResultUsers] = useState([]);
+  const [resultRequests, setResultRequests] = useState([]);
   const [newEmail, setNewEmail] = useState('');
-  const [newRoles, setNewRoles] = useState(DEFAULT_NEW_USER_ROLES);
+  const [newRoles, setNewRoles] = useState(DEFAULT_NORMAL_ROLES);
   const [busyKey, setBusyKey] = useState('');
   const [feedback, setFeedback] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => subscribeAllowedUsers(setAllowedUsers), []);
   useEffect(() => subscribeAccessRequests(setRequests), []);
+  useEffect(() => subscribeAllowedResultUsers(setAllowedResultUsers), []);
+  useEffect(() => subscribePendingResultAccessRequests(setResultRequests), []);
 
   const currentEmail = currentUser?.email?.trim().toLowerCase() ?? '';
   const currentUserEntry = useMemo(
@@ -56,8 +73,8 @@ export default function AdminPage({ currentUser }) {
     try {
       await saveAllowedUser(email, newRoles);
       setNewEmail('');
-      setNewRoles(DEFAULT_NEW_USER_ROLES);
-      setFeedback(`Accès ajouté pour ${email}.`);
+      setNewRoles(DEFAULT_NORMAL_ROLES);
+      setFeedback(`Accès Google ajouté pour ${email}.`);
     } catch (err) {
       setError(getErrorLabel(err));
     } finally {
@@ -109,13 +126,8 @@ export default function AdminPage({ currentUser }) {
     clearMessages();
     setBusyKey(`approve:${email}`);
     try {
-      await approveAccessRequest(email, {
-        administration: false,
-        admin_flux: false,
-        participants: false,
-        results: false,
-      });
-      setFeedback(`Demande approuvée pour ${email}.`);
+      await approveAccessRequest(email, DEFAULT_NORMAL_ROLES);
+      setFeedback(`Demande Google approuvée pour ${email}.`);
     } catch (err) {
       setError(getErrorLabel(err));
     } finally {
@@ -128,7 +140,62 @@ export default function AdminPage({ currentUser }) {
     setBusyKey(`reject:${email}`);
     try {
       await rejectAccessRequest(email);
-      setFeedback(`Demande refusée pour ${email}.`);
+      setFeedback(`Demande Google refusée pour ${email}.`);
+    } catch (err) {
+      setError(getErrorLabel(err));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const handleApproveResultRequest = async (uid) => {
+    clearMessages();
+    setBusyKey(`result-approve:${uid}`);
+    try {
+      await approveResultAccessRequest(uid);
+      setFeedback(`Demande résultats approuvée pour ${uid}.`);
+    } catch (err) {
+      setError(getErrorLabel(err));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const handleRejectResultRequest = async (uid) => {
+    clearMessages();
+    setBusyKey(`result-reject:${uid}`);
+    try {
+      await rejectResultAccessRequest(uid);
+      setFeedback(`Demande résultats refusée pour ${uid}.`);
+    } catch (err) {
+      setError(getErrorLabel(err));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const handleResultRoleToggle = async (uid, role, checked) => {
+    clearMessages();
+    const entry = allowedResultUsers.find((user) => user.id === uid);
+    if (!entry) return;
+
+    setBusyKey(`result-role:${uid}:${role}`);
+    try {
+      await saveAllowedResultUser(uid, { ...entry, [role]: checked });
+      setFeedback(`Droits résultats mis à jour pour ${entry.email || uid}.`);
+    } catch (err) {
+      setError(getErrorLabel(err));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const handleDeleteResultUser = async (uid) => {
+    clearMessages();
+    setBusyKey(`result-delete:${uid}`);
+    try {
+      await deleteAllowedResultUser(uid);
+      setFeedback(`Accès résultats supprimé pour ${uid}.`);
     } catch (err) {
       setError(getErrorLabel(err));
     } finally {
@@ -141,7 +208,8 @@ export default function AdminPage({ currentUser }) {
       <section className="config-section">
         <h2 className="section-title">Administration</h2>
         <p className="hint">
-          Gérez ici les demandes d&apos;accès et les rôles stockés dans <code>allowedUsers</code>.
+          Les accès Google sensibles sont gérés dans <code>allowedUsers</code>. Les opérateurs
+          résultats sont gérés par <code>uid</code> dans <code>allowedResultUsers</code>.
         </p>
         {currentUserEntry && (
           <div className="admin-banner">
@@ -154,28 +222,19 @@ export default function AdminPage({ currentUser }) {
 
       <section className="config-section">
         <div className="admin-section-head">
-          <h2 className="section-title">Demandes en cours</h2>
+          <h2 className="section-title">Demandes Google</h2>
           <span className="admin-counter">{requests.length}</span>
         </div>
         {requests.length === 0 ? (
-          <div className="stream-empty">Aucune demande d&apos;accès en attente.</div>
+          <div className="stream-empty">Aucune demande Google en attente.</div>
         ) : (
           <div className="admin-card-list">
             {requests.map((request) => (
               <article key={request.id} className="admin-card">
                 <div className="admin-card-main">
                   <div className="admin-email">{request.email}</div>
-                  {request.displayName && (
-                    <div className="admin-subline">{request.displayName}</div>
-                  )}
-                  <div className="admin-subline">
-                    Demandé {formatTimestamp(request.requestedAt)}
-                  </div>
-                  {request.signInProvider && (
-                    <div className="admin-subline">
-                      Connexion: {getProviderLabel(request.signInProvider)}
-                    </div>
-                  )}
+                  {request.displayName && <div className="admin-subline">{request.displayName}</div>}
+                  <div className="admin-subline">Demandé {formatTimestamp(request.requestedAt)}</div>
                 </div>
                 <div className="admin-actions">
                   <button
@@ -200,7 +259,48 @@ export default function AdminPage({ currentUser }) {
       </section>
 
       <section className="config-section">
-        <h2 className="section-title">Ajouter un utilisateur</h2>
+        <div className="admin-section-head">
+          <h2 className="section-title">Demandes Résultats</h2>
+          <span className="admin-counter">{resultRequests.length}</span>
+        </div>
+        {resultRequests.length === 0 ? (
+          <div className="stream-empty">Aucune demande résultats en attente.</div>
+        ) : (
+          <div className="admin-card-list">
+            {resultRequests.map((request) => (
+              <article key={request.id} className="admin-card">
+                <div className="admin-card-main">
+                  <div className="admin-email">{request.email || request.uid}</div>
+                  <div className="admin-subline">UID {request.uid}</div>
+                  <div className="admin-subline">
+                    Provider: {getProviderLabel(request.providerId)}
+                  </div>
+                  <div className="admin-subline">Demandé {formatTimestamp(request.requestedAt)}</div>
+                </div>
+                <div className="admin-actions">
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => handleApproveResultRequest(request.uid)}
+                    disabled={busyKey !== '' && busyKey !== `result-approve:${request.uid}`}
+                  >
+                    {busyKey === `result-approve:${request.uid}` ? 'Validation…' : 'Approuver'}
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleRejectResultRequest(request.uid)}
+                    disabled={busyKey !== '' && busyKey !== `result-reject:${request.uid}`}
+                  >
+                    {busyKey === `result-reject:${request.uid}` ? 'Refus…' : 'Refuser'}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="config-section">
+        <h2 className="section-title">Ajouter un compte Google</h2>
         <form className="add-stream-form" onSubmit={handleAddUser}>
           <label className="form-label" htmlFor="new-user-email">Adresse email</label>
           <input
@@ -214,6 +314,8 @@ export default function AdminPage({ currentUser }) {
           />
           <RoleEditor
             roles={newRoles}
+            roleKeys={ADMIN_ROLE_KEYS}
+            labels={NORMAL_ROLE_LABELS}
             disabled={busyKey.startsWith('add:')}
             onToggle={(role, checked) => setNewRoles((prev) => ({ ...prev, [role]: checked }))}
           />
@@ -227,20 +329,18 @@ export default function AdminPage({ currentUser }) {
 
       <section className="config-section">
         <div className="admin-section-head">
-          <h2 className="section-title">Utilisateurs autorisés</h2>
+          <h2 className="section-title">Comptes Google autorisés</h2>
           <span className="admin-counter">{allowedUsers.length}</span>
         </div>
         {allowedUsers.length === 0 ? (
-          <div className="stream-empty">Aucun utilisateur autorisé.</div>
+          <div className="stream-empty">Aucun compte Google autorisé.</div>
         ) : (
           <div className="admin-table-wrap">
             <table className="admin-table">
               <thead>
                 <tr>
                   <th>Email</th>
-                  {ADMIN_ROLE_KEYS.map((role) => (
-                    <th key={role}>{ROLE_LABELS[role]}</th>
-                  ))}
+                  {ADMIN_ROLE_KEYS.map((role) => <th key={role}>{NORMAL_ROLE_LABELS[role]}</th>)}
                   <th>Mise à jour</th>
                   <th></th>
                 </tr>
@@ -250,9 +350,7 @@ export default function AdminPage({ currentUser }) {
                   <tr key={entry.id}>
                     <td>
                       <div className="admin-email">{entry.email ?? entry.id}</div>
-                      {entry.id === currentEmail && (
-                        <div className="admin-subline">Compte courant</div>
-                      )}
+                      {entry.id === currentEmail && <div className="admin-subline">Compte courant</div>}
                     </td>
                     {ADMIN_ROLE_KEYS.map((role) => {
                       const key = `role:${entry.id}:${role}`;
@@ -266,7 +364,6 @@ export default function AdminPage({ currentUser }) {
                               disabled={(busyKey !== '' && busyKey !== key) || lockSelfAdmin}
                               onChange={(e) => handleRoleToggle(entry.id, role, e.target.checked)}
                             />
-                            <span />
                           </label>
                         </td>
                       );
@@ -288,14 +385,73 @@ export default function AdminPage({ currentUser }) {
           </div>
         )}
       </section>
+
+      <section className="config-section">
+        <div className="admin-section-head">
+          <h2 className="section-title">Opérateurs Résultats</h2>
+          <span className="admin-counter">{allowedResultUsers.length}</span>
+        </div>
+        {allowedResultUsers.length === 0 ? (
+          <div className="stream-empty">Aucun opérateur résultats autorisé.</div>
+        ) : (
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>UID</th>
+                  {RESULT_ROLE_KEYS.map((role) => <th key={role}>{RESULT_ROLE_LABELS[role]}</th>)}
+                  <th>Mise à jour</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {allowedResultUsers.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>
+                      <div className="admin-email">{entry.email || '—'}</div>
+                    </td>
+                    <td className="admin-uid">{entry.uid || entry.id}</td>
+                    {RESULT_ROLE_KEYS.map((role) => {
+                      const key = `result-role:${entry.id}:${role}`;
+                      return (
+                        <td key={role} className="admin-cell-center">
+                          <label className="admin-check">
+                            <input
+                              type="checkbox"
+                              checked={!!entry[role]}
+                              disabled={busyKey !== '' && busyKey !== key}
+                              onChange={(e) => handleResultRoleToggle(entry.id, role, e.target.checked)}
+                            />
+                          </label>
+                        </td>
+                      );
+                    })}
+                    <td className="admin-updated-at">{formatTimestamp(entry.updatedAt)}</td>
+                    <td className="admin-cell-actions">
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={() => handleDeleteResultUser(entry.id)}
+                        disabled={busyKey !== '' && busyKey !== `result-delete:${entry.id}`}
+                      >
+                        {busyKey === `result-delete:${entry.id}` ? 'Suppression…' : 'Retirer'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
 
-function RoleEditor({ roles, disabled, onToggle }) {
+function RoleEditor({ roles, roleKeys, labels, disabled, onToggle }) {
   return (
     <div className="admin-role-grid">
-      {ADMIN_ROLE_KEYS.map((role) => (
+      {roleKeys.map((role) => (
         <label key={role} className="admin-role-pill">
           <input
             type="checkbox"
@@ -303,7 +459,7 @@ function RoleEditor({ roles, disabled, onToggle }) {
             disabled={disabled}
             onChange={(e) => onToggle(role, e.target.checked)}
           />
-          <span>{ROLE_LABELS[role]}</span>
+          <span>{labels[role]}</span>
         </label>
       ))}
     </div>
@@ -320,12 +476,12 @@ function formatTimestamp(value) {
   }).format(date);
 }
 
-function getErrorLabel(error) {
-  return error?.code ? `Erreur : ${error.code}` : "Une erreur est survenue.";
-}
-
 function getProviderLabel(providerId) {
   if (providerId === 'google.com') return 'Google OAuth';
-  if (providerId === 'password') return 'Lien email';
-  return providerId;
+  if (providerId === 'anonymous') return 'Anonyme Firebase';
+  return providerId || 'inconnu';
+}
+
+function getErrorLabel(error) {
+  return error?.code ? `Erreur : ${error.code}` : error?.message || "Une erreur est survenue.";
 }

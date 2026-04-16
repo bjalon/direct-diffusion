@@ -1,268 +1,594 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { signInAnonymously } from 'firebase/auth';
+import { auth } from '../firebase';
 import { subscribeParticipants } from '../firebase/participants';
-import { subscribeRaces, addRace, subscribeResults, addResult, deleteResult, finishRace, reopenRace } from '../firebase/races';
-import { parseTime } from '../utils/time';
+import {
+  armCurrentCompetitor,
+  cancelCurrentCompetitor,
+  claimStation,
+  completeCurrentCompetitor,
+  releaseStation,
+  submitResultAccessRequest,
+  subscribeCurrentCompetitor,
+  subscribeResultAccess,
+  subscribeResultAccessRequest,
+  subscribeStation,
+  syncStartBuffer,
+  verifyBrowserClock,
+} from '../firebase/results';
+import {
+  clearStartBuffer,
+  createClickEntry,
+  loadStartBuffer,
+  saveStartBuffer,
+} from '../utils/resultsBuffer';
 
-export default function ResultsPage({ canEdit = false }) {
+export default function ResultsPage({ user, onLogout }) {
+  const [signInState, setSignInState] = useState('idle');
+  const [clockState, setClockState] = useState({ status: 'pending', driftMs: 0, error: '' });
+  const [requestEmail, setRequestEmail] = useState('');
+  const [submitState, setSubmitState] = useState('idle');
+  const [resultAccess, setResultAccess] = useState(null);
+  const [resultRequest, setResultRequest] = useState(null);
   const [participants, setParticipants] = useState([]);
-  const [races, setRaces]               = useState([]);
-  const [selectedRaceId, setSelectedRaceId] = useState(null);
-  const [results, setResults]           = useState([]);
-  const [dialogParticipant, setDialogParticipant] = useState(null);
-  const [raceInput, setRaceInput]       = useState('');
-  const [autoSelected, setAutoSelected] = useState(false);
-
-  useEffect(() => subscribeParticipants(setParticipants), []);
-
-  useEffect(() => subscribeRaces((r) => {
-    setRaces(r);
-  }), []);
-
-  // Auto-select the most recent race once on first load
-  useEffect(() => {
-    if (!autoSelected && races.length > 0) {
-      setSelectedRaceId(races[0].id);
-      setAutoSelected(true);
-    }
-  }, [races, autoSelected]);
+  const [selectedStation, setSelectedStation] = useState('');
+  const [stationState, setStationState] = useState('idle');
+  const [stationError, setStationError] = useState('');
+  const [stationDocs, setStationDocs] = useState({ start: null, finish: null });
+  const [currentCompetitor, setCurrentCompetitor] = useState(null);
+  const [startBuffer, setStartBuffer] = useState([]);
+  const [actionError, setActionError] = useState('');
+  const [busyAction, setBusyAction] = useState('');
 
   useEffect(() => {
-    if (!selectedRaceId) { setResults([]); return; }
-    return subscribeResults(selectedRaceId, setResults);
-  }, [selectedRaceId]);
+    if (user !== false || signInState === 'signing-in') return;
+    setSignInState('signing-in');
+    signInAnonymously(auth)
+      .then(() => setSignInState('done'))
+      .catch((error) => {
+        setSignInState('error');
+        setActionError(getErrorLabel(error));
+      });
+  }, [user, signInState]);
 
-  const handleNewRace = async () => {
-    const number = raceInput.trim();
-    if (!number) return;
-    const ref = await addRace(number);
-    setSelectedRaceId(ref.id);
-    setAutoSelected(true);
-    setRaceInput('');
-  };
+  useEffect(() => {
+    if (!user || user === false) return;
 
-  const handleAddResult = async (time) => {
-    if (!dialogParticipant || !selectedRaceId) return;
-    await addResult(selectedRaceId, {
-      participantId:    dialogParticipant.id,
-      participantLabel: dialogParticipant.label,
-      time,
+    setClockState({ status: 'checking', driftMs: 0, error: '' });
+    verifyBrowserClock(user.uid)
+      .then(({ driftMs }) => {
+        if (Math.abs(driftMs) > 1000) {
+          setClockState({ status: 'invalid', driftMs, error: '' });
+        } else {
+          setClockState({ status: 'valid', driftMs, error: '' });
+        }
+      })
+      .catch((error) => {
+        setClockState({ status: 'error', driftMs: 0, error: getErrorLabel(error) });
+      });
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user || user === false) return;
+    return subscribeResultAccess(user.uid, setResultAccess);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user || user === false) return;
+    return subscribeResultAccessRequest(user.uid, (request) => {
+      setResultRequest(request);
+      if (request?.email) setRequestEmail(request.email);
     });
-    setDialogParticipant(null);
-  };
+  }, [user?.uid]);
 
-  // Count results per participant for the selected race
-  const counts = {};
-  results.forEach((r) => {
-    counts[r.participantId] = (counts[r.participantId] || 0) + 1;
-  });
+  const canStart = !!resultAccess?.results_start;
+  const canFinish = !!resultAccess?.results_finish;
+  const hasResultAccess = canStart || canFinish;
+  const actor = useMemo(() => {
+    if (!user || user === false) return null;
+    return {
+      uid: user.uid,
+      email: (resultAccess?.email || resultRequest?.email || user.email || '').trim().toLowerCase(),
+      providerId: primaryProvider(user),
+    };
+  }, [user, resultAccess?.email, resultRequest?.email]);
 
-  // Compute rank per result id based on time (1 = fastest)
-  const rankById = {};
-  [...results]
-    .sort((a, b) => parseTime(a.time) - parseTime(b.time))
-    .forEach((r, i) => { rankById[r.id] = i + 1; });
+  useEffect(() => {
+    if (!hasResultAccess) {
+      setSelectedStation('');
+      return;
+    }
+    if (canStart && !canFinish) setSelectedStation('start');
+    if (canFinish && !canStart) setSelectedStation('finish');
+  }, [canStart, canFinish, hasResultAccess]);
 
-  const selectedRace = races.find((r) => r.id === selectedRaceId);
+  useEffect(() => {
+    if (!hasResultAccess) return;
+    return subscribeCurrentCompetitor(setCurrentCompetitor);
+  }, [hasResultAccess]);
+
+  useEffect(() => {
+    if (!canStart) return;
+    return subscribeParticipants(setParticipants);
+  }, [canStart]);
+
+  useEffect(() => {
+    const unsubs = [];
+    if (canStart) {
+      unsubs.push(subscribeStation('start', (doc) => setStationDocs((prev) => ({ ...prev, start: doc }))));
+    }
+    if (canFinish) {
+      unsubs.push(subscribeStation('finish', (doc) => setStationDocs((prev) => ({ ...prev, finish: doc }))));
+    }
+    return () => unsubs.forEach((unsub) => unsub());
+  }, [canStart, canFinish]);
+
+  useEffect(() => {
+    if (!selectedStation || !actor || !hasResultAccess) return;
+    setStationState('claiming');
+    setStationError('');
+    claimStation(selectedStation, actor)
+      .then(() => setStationState('claimed'))
+      .catch((error) => {
+        setStationState('error');
+        setStationError(getErrorLabel(error));
+      });
+  }, [selectedStation, actor?.uid, hasResultAccess]);
+
+  useEffect(() => {
+    const runId = currentCompetitor?.runId;
+    if (!runId || currentCompetitor?.selectedByUid !== actor?.uid || selectedStation !== 'start') {
+      setStartBuffer([]);
+      return;
+    }
+    setStartBuffer(loadStartBuffer(runId));
+  }, [currentCompetitor?.runId, currentCompetitor?.selectedByUid, actor?.uid, selectedStation]);
+
+  useEffect(() => () => {
+    if (selectedStation && actor?.uid) {
+      releaseStation(selectedStation, actor.uid).catch(() => {});
+    }
+  }, [selectedStation, actor?.uid]);
+
+  if (user === false || signInState === 'signing-in') {
+    return <ResultsLoadingCard label="Connexion anonyme du poste résultats…" />;
+  }
+
+  if (signInState === 'error') {
+    return <ResultsErrorCard title="Connexion impossible" message={actionError} onLogout={onLogout} />;
+  }
+
+  if (!user) {
+    return <ResultsLoadingCard label="Préparation du poste résultats…" />;
+  }
+
+  if (clockState.status === 'checking' || clockState.status === 'pending') {
+    return <ResultsLoadingCard label="Vérification de l’horloge du navigateur…" />;
+  }
+
+  if (clockState.status === 'invalid') {
+    return (
+      <ResultsErrorCard
+        title="Horloge locale incorrecte"
+        message={`L’horloge du navigateur dérive de ${Math.abs(clockState.driftMs)} ms. Mettez l’heure du poste à jour avant de poursuivre.`}
+        onLogout={onLogout}
+      />
+    );
+  }
+
+  if (clockState.status === 'error') {
+    return <ResultsErrorCard title="Vérification impossible" message={clockState.error} onLogout={onLogout} />;
+  }
+
+  if (!hasResultAccess) {
+    const pendingLike = resultRequest || resultAccess;
+    if (pendingLike) {
+      return (
+        <ResultsShell title="Demande en attente" subtitle="Votre demande d’accès résultats a bien été enregistrée.">
+          <div className="results-status-card">
+            <div className="results-status-line"><strong>Email:</strong> {pendingLike.email || '—'}</div>
+            <div className="results-status-line"><strong>UID:</strong> {user.uid}</div>
+            <div className="results-status-line"><strong>Statut:</strong> {statusLabel(pendingLike.status)}</div>
+            <button className="btn btn-secondary login-btn" onClick={onLogout}>Se déconnecter</button>
+          </div>
+        </ResultsShell>
+      );
+    }
+
+    return (
+      <ResultsShell
+        title="Demande d’accès résultats"
+        subtitle="Saisissez votre email. L’administrateur validera ensuite le poste depuis la vue d’administration."
+      >
+        <form
+          className="login-form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!requestEmail.trim()) return;
+            setSubmitState('sending');
+            setActionError('');
+            try {
+              await submitResultAccessRequest({
+                uid: user.uid,
+                email: requestEmail,
+                providerId: primaryProvider(user),
+              });
+              setSubmitState('sent');
+            } catch (error) {
+              setSubmitState('error');
+              setActionError(getErrorLabel(error));
+            }
+          }}
+        >
+          <input
+            type="email"
+            className="form-input"
+            placeholder="votre@email.com"
+            value={requestEmail}
+            onChange={(e) => setRequestEmail(e.target.value)}
+            required
+            autoFocus
+          />
+          <button className="btn btn-primary login-btn" type="submit" disabled={submitState === 'sending'}>
+            {submitState === 'sending' ? 'Envoi…' : 'Envoyer la demande'}
+          </button>
+          <button className="btn btn-secondary login-btn" type="button" onClick={onLogout}>
+            Se déconnecter
+          </button>
+          {actionError && <div className="form-error">{actionError}</div>}
+        </form>
+      </ResultsShell>
+    );
+  }
+
+  if (!selectedStation) {
+    return (
+      <ResultsShell title="Choix du poste" subtitle="Sélectionnez le poste que vous allez tenir.">
+        <div className="results-station-grid">
+          {canStart && (
+            <StationChoiceCard
+              station="start"
+              doc={stationDocs.start}
+              actorUid={actor?.uid}
+              onSelect={() => setSelectedStation('start')}
+            />
+          )}
+          {canFinish && (
+            <StationChoiceCard
+              station="finish"
+              doc={stationDocs.finish}
+              actorUid={actor?.uid}
+              onSelect={() => setSelectedStation('finish')}
+            />
+          )}
+        </div>
+        <button className="btn btn-secondary login-btn" onClick={onLogout}>Se déconnecter</button>
+      </ResultsShell>
+    );
+  }
+
+  if (stationState === 'claiming') {
+    return <ResultsLoadingCard label={`Réservation du poste ${selectedStation === 'start' ? 'départ' : 'arrivée'}…`} />;
+  }
+
+  if (stationState === 'error') {
+    return (
+      <ResultsErrorCard
+        title="Poste indisponible"
+        message={stationError || 'Ce poste est déjà utilisé sur un autre appareil.'}
+        actions={(
+          <>
+            {(canStart && canFinish) && (
+              <button className="btn btn-secondary login-btn" onClick={() => { setSelectedStation(''); setStationState('idle'); }}>
+                Changer de poste
+              </button>
+            )}
+            <button className="btn btn-secondary login-btn" onClick={onLogout}>Se déconnecter</button>
+          </>
+        )}
+      />
+    );
+  }
+
+  if (selectedStation === 'start') {
+    return (
+      <StartStationView
+        actor={actor}
+        participants={participants}
+        currentCompetitor={currentCompetitor}
+        startBuffer={startBuffer}
+        setStartBuffer={setStartBuffer}
+        busyAction={busyAction}
+        setBusyAction={setBusyAction}
+        actionError={actionError}
+        setActionError={setActionError}
+        onReleaseStation={async () => {
+          await releaseStation('start', actor.uid);
+          setSelectedStation('');
+          setStationState('idle');
+        }}
+        onLogout={onLogout}
+      />
+    );
+  }
 
   return (
-    <div className="results-page">
+    <FinishStationView
+      actor={actor}
+      currentCompetitor={currentCompetitor}
+      busyAction={busyAction}
+      setBusyAction={setBusyAction}
+      actionError={actionError}
+      setActionError={setActionError}
+      onReleaseStation={async () => {
+        await releaseStation('finish', actor.uid);
+        setSelectedStation('');
+        setStationState('idle');
+      }}
+      onLogout={onLogout}
+    />
+  );
+}
 
-      {/* ── Race bar ── */}
-      <div className="race-bar">
-        <select
-          className="race-select"
-          value={selectedRaceId || ''}
-          onChange={(e) => setSelectedRaceId(e.target.value || null)}
-        >
-          <option value="">— Choisir une course —</option>
-          {races.map((r) => (
-            <option key={r.id} value={r.id}>Course {r.number}</option>
+function StartStationView({
+  actor,
+  participants,
+  currentCompetitor,
+  startBuffer,
+  setStartBuffer,
+  busyAction,
+  setBusyAction,
+  actionError,
+  setActionError,
+  onReleaseStation,
+  onLogout,
+}) {
+  const ownsCurrent = currentCompetitor?.selectedByUid === actor.uid;
+  const isArmed = ownsCurrent && currentCompetitor?.status === 'armed';
+  const isRunning = currentCompetitor?.status === 'running';
+
+  const appendStartClick = () => {
+    if (!currentCompetitor?.runId) return;
+    const next = [...startBuffer, createClickEntry()];
+    setStartBuffer(next);
+    saveStartBuffer(currentCompetitor.runId, next);
+  };
+
+  return (
+    <ResultsShell title="Poste départ" subtitle={actor.email || 'poste anonyme'}>
+      <StationToolbar onReleaseStation={onReleaseStation} onLogout={onLogout} />
+
+      {actionError && <div className="form-error">{actionError}</div>}
+
+      {!currentCompetitor && (
+        <div className="results-participant-list">
+          {participants.length === 0 && <div className="stream-empty">Aucun participant disponible.</div>}
+          {participants.map((participant) => (
+            <button
+              key={participant.id}
+              className="results-participant-button"
+              disabled={busyAction !== ''}
+              onClick={async () => {
+                setBusyAction(`arm:${participant.id}`);
+                setActionError('');
+                try {
+                  const runId = createClickEntry().clickId;
+                  await armCurrentCompetitor({
+                    participant,
+                    actor,
+                    runId,
+                    selectedAtClientMs: Date.now(),
+                  });
+                  clearStartBuffer(runId);
+                  setStartBuffer([]);
+                } catch (error) {
+                  setActionError(getErrorLabel(error));
+                } finally {
+                  setBusyAction('');
+                }
+              }}
+            >
+              {busyAction === `arm:${participant.id}` ? 'Préparation…' : participant.label}
+            </button>
           ))}
-        </select>
+        </div>
+      )}
 
-        {canEdit && (
-          <div className="new-race-row">
-            <input
-              className="form-input new-race-input"
-              placeholder="Numéro"
-              value={raceInput}
-              onChange={(e) => setRaceInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleNewRace(); }}
-            />
-            <button className="btn btn-primary" onClick={handleNewRace}>
-              + Nouvelle course
+      {currentCompetitor && !ownsCurrent && (
+        <div className="results-status-card">
+          <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+          <p className="login-subtitle">Une course est déjà en préparation ou en cours sur ce poste.</p>
+        </div>
+      )}
+
+      {isArmed && (
+        <div className="results-action-card">
+          <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+          <div className="results-status-line">Départs en mémoire: {startBuffer.length}</div>
+          <div className="results-action-grid">
+            <button className="btn btn-primary results-big-button" onClick={appendStartClick}>
+              Départ
+            </button>
+            <button
+              className="btn btn-danger results-big-button"
+              disabled={busyAction === 'cancel'}
+              onClick={async () => {
+                setBusyAction('cancel');
+                setActionError('');
+                try {
+                  await cancelCurrentCompetitor(currentCompetitor.runId, actor.uid);
+                  clearStartBuffer(currentCompetitor.runId);
+                  setStartBuffer([]);
+                } catch (error) {
+                  setActionError(getErrorLabel(error));
+                } finally {
+                  setBusyAction('');
+                }
+              }}
+            >
+              {busyAction === 'cancel' ? 'Annulation…' : 'Annuler'}
             </button>
           </div>
-        )}
+          {startBuffer.length > 0 && (
+            <button
+              className="btn btn-secondary results-next-button"
+              disabled={busyAction === 'sync'}
+              onClick={async () => {
+                setBusyAction('sync');
+                setActionError('');
+                try {
+                  await syncStartBuffer({ currentCompetitor, clicks: startBuffer, actor });
+                  clearStartBuffer(currentCompetitor.runId);
+                  setStartBuffer([]);
+                } catch (error) {
+                  setActionError(getErrorLabel(error));
+                } finally {
+                  setBusyAction('');
+                }
+              }}
+            >
+              {busyAction === 'sync' ? 'Synchronisation…' : 'Suivant'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {isRunning && (
+        <div className="results-status-card">
+          <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+          <p className="login-subtitle">Course en cours. En attente de l’arrivée.</p>
+        </div>
+      )}
+    </ResultsShell>
+  );
+}
+
+function FinishStationView({
+  actor,
+  currentCompetitor,
+  busyAction,
+  setBusyAction,
+  actionError,
+  setActionError,
+  onReleaseStation,
+  onLogout,
+}) {
+  return (
+    <ResultsShell title="Poste arrivée" subtitle={actor.email || 'poste anonyme'}>
+      <StationToolbar onReleaseStation={onReleaseStation} onLogout={onLogout} />
+      {actionError && <div className="form-error">{actionError}</div>}
+
+      {!currentCompetitor && (
+        <div className="results-status-card">
+          <div className="results-big-name">En attente</div>
+          <p className="login-subtitle">Aucun concurrent n’a encore été lancé depuis le départ.</p>
+        </div>
+      )}
+
+      {currentCompetitor && (
+        <div className="results-action-card">
+          <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+          <p className="login-subtitle">Appuyez dès que le concurrent franchit l’arrivée.</p>
+          <button
+            className="btn btn-primary results-big-button results-big-button--success"
+            disabled={busyAction === 'finish'}
+            onClick={async () => {
+              setBusyAction('finish');
+              setActionError('');
+              try {
+                await completeCurrentCompetitor({
+                  actor,
+                  click: createClickEntry(),
+                });
+              } catch (error) {
+                setActionError(getErrorLabel(error));
+              } finally {
+                setBusyAction('');
+              }
+            }}
+          >
+            {busyAction === 'finish' ? 'Envoi…' : 'Arrivé'}
+          </button>
+        </div>
+      )}
+    </ResultsShell>
+  );
+}
+
+function StationChoiceCard({ station, doc, actorUid, onSelect }) {
+  const busy = doc?.assignedUid && doc.assignedUid !== actorUid;
+  const label = station === 'start' ? 'Départ' : 'Arrivée';
+
+  return (
+    <button className="results-station-card" disabled={busy} onClick={onSelect}>
+      <div className="results-station-title">{label}</div>
+      <div className="results-station-subtitle">
+        {busy ? `Occupé par ${doc.assignedEmail || doc.assignedUid}` : 'Disponible'}
       </div>
+    </button>
+  );
+}
 
-      {/* ── Main layout ── */}
-      {selectedRaceId ? (
-        <div className="results-layout">
-
-          {/* Left: participant list */}
-          <div className="results-panel">
-            <div className="panel-title panel-title--row">
-              <span>Participants — Course&nbsp;<strong>{selectedRace?.number}</strong></span>
-              {canEdit && (selectedRace?.finished ? (
-                <button className="btn btn-secondary btn-sm" onClick={() => reopenRace(selectedRaceId)}>
-                  Réouvrir
-                </button>
-              ) : (
-                <button className="btn btn-finish btn-sm" onClick={() => finishRace(selectedRaceId)}>
-                  ✓ Terminer
-                </button>
-              ))}
-            </div>
-            {participants.length === 0 && (
-              <div className="stream-empty">Aucun participant configuré.</div>
-            )}
-            {participants.map((p) => {
-              const count = counts[p.id] || 0;
-              return (
-                <div
-                  key={p.id}
-                  className={`rp-row${count > 0 ? ' rp-row--done' : ''}`}
-                >
-                  <span className="rp-label">{p.label}</span>
-                  {count > 0 && <span className="rp-badge">{count}</span>}
-                  {canEdit && (
-                    <button
-                      className="btn-plus"
-                      onClick={() => setDialogParticipant(p)}
-                      aria-label={`Ajouter un temps pour ${p.label}`}
-                    >
-                      +
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Right: results table */}
-          <div className="results-panel">
-            <div className="panel-title">Classement</div>
-            {results.length === 0 ? (
-              <div className="stream-empty">
-                {canEdit ? 'Appuyez sur + pour enregistrer un temps.' : 'Aucun résultat.'}
-              </div>
-            ) : (
-              <table className="results-table">
-                <thead>
-                  <tr>
-                    <th className="rt-rank">#</th>
-                    <th>Participant</th>
-                    <th className="rt-time">Temps</th>
-                    {canEdit && <th></th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.map((r) => (
-                    <tr key={r.id}>
-                      <td className="rt-rank">{rankById[r.id]}</td>
-                      <td>{r.participantLabel}</td>
-                      <td className="rt-time">{r.time}</td>
-                      {canEdit && (
-                        <td>
-                          <button
-                            className="btn btn-danger btn-sm"
-                            onClick={() => deleteResult(selectedRaceId, r.id)}
-                            aria-label="Supprimer"
-                          >
-                            ✕
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="results-empty">
-          Créez ou sélectionnez une course pour commencer.
-        </div>
-      )}
-
-      {/* Time entry dialog */}
-      {canEdit && dialogParticipant && (
-        <TimeEntryDialog
-          participant={dialogParticipant}
-          onConfirm={handleAddResult}
-          onClose={() => setDialogParticipant(null)}
-        />
-      )}
+function StationToolbar({ onReleaseStation, onLogout }) {
+  return (
+    <div className="results-toolbar">
+      <button className="btn btn-secondary btn-sm" onClick={onReleaseStation}>
+        Libérer le poste
+      </button>
+      <button className="btn btn-secondary btn-sm" onClick={onLogout}>
+        Déconnexion
+      </button>
     </div>
   );
 }
 
-// ── Time entry dialog ─────────────────────────────────────────────────────────
-
-const NUMPAD_ROWS = [
-  ['1', '2', '3'],
-  ['4', '5', '6'],
-  ['7', '8', '9'],
-  ['.', '0', '⌫'],
-];
-
-function TimeEntryDialog({ participant, onConfirm, onClose }) {
-  const [input, setInput] = useState('');
-
-  const press = (key) => {
-    if (key === '⌫') {
-      setInput((v) => v.slice(0, -1));
-    } else {
-      // Prevent multiple dots
-      if (key === '.' && input.includes('.')) return;
-      setInput((v) => v + key);
-    }
-  };
-
-  const confirm = () => {
-    if (input.trim()) onConfirm(input.trim());
-  };
-
-  // Allow physical keyboard too
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.key >= '0' && e.key <= '9') press(e.key);
-      else if (e.key === '.') press('.');
-      else if (e.key === 'Backspace') press('⌫');
-      else if (e.key === 'Enter') confirm();
-      else if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  });
-
+function ResultsShell({ title, subtitle, children }) {
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="time-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="time-dialog-name">{participant.label}</div>
-        <div className="time-display">{input || <span className="time-placeholder">0</span>}</div>
-
-        <div className="numpad">
-          {NUMPAD_ROWS.map((row, i) => (
-            <div key={i} className="numpad-row">
-              {row.map((k) => (
-                <button key={k} className="numpad-key" onClick={() => press(k)}>
-                  {k}
-                </button>
-              ))}
-            </div>
-          ))}
-          <button
-            className="numpad-key numpad-confirm"
-            onClick={confirm}
-            disabled={!input.trim()}
-          >
-            Valider ✓
-          </button>
+    <div className="results-shell">
+      <div className="results-shell-card">
+        <div className="results-shell-head">
+          <h1 className="results-shell-title">{title}</h1>
+          {subtitle && <p className="results-shell-subtitle">{subtitle}</p>}
         </div>
+        {children}
       </div>
     </div>
   );
+}
+
+function ResultsLoadingCard({ label }) {
+  return (
+    <ResultsShell title="Résultats" subtitle={label}>
+      <div className="results-loading-block">
+        <div className="login-spinner" />
+      </div>
+    </ResultsShell>
+  );
+}
+
+function ResultsErrorCard({ title, message, onLogout, actions }) {
+  return (
+    <ResultsShell title={title} subtitle={message}>
+      <div className="results-status-card">
+        {actions || <button className="btn btn-secondary login-btn" onClick={onLogout}>Se déconnecter</button>}
+      </div>
+    </ResultsShell>
+  );
+}
+
+function primaryProvider(user) {
+  return user?.providerData?.[0]?.providerId || 'anonymous';
+}
+
+function statusLabel(status) {
+  if (status === 'approved') return 'Approuvée';
+  if (status === 'rejected') return 'Refusée';
+  return 'En attente';
+}
+
+function getErrorLabel(error) {
+  if (error?.message === 'station-occupied') return 'Ce poste est déjà utilisé sur un autre appareil.';
+  if (error?.message === 'current-competitor-busy') return 'Un concurrent est déjà en cours.';
+  if (error?.message === 'no-current-competitor') return 'Aucun concurrent en cours.';
+  return error?.code ? `Erreur : ${error.code}` : error?.message || 'Une erreur est survenue.';
 }

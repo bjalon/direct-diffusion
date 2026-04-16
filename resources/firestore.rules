@@ -2,30 +2,35 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null && request.auth.token.email != null;
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function hasEmail() {
+      return isAuthenticated() && request.auth.token.email != null;
     }
 
     function userEmail() {
       return lower(request.auth.token.email);
     }
 
-    function userEntry() {
-      return get(/databases/$(database)/documents/allowedUsers/$(userEmail()));
+    function isGoogleUser() {
+      return isAuthenticated()
+             && request.auth.token.firebase != null
+             && request.auth.token.firebase.sign_in_provider == 'google.com';
     }
 
     function isAllowedUser() {
-      return signedIn() && userEntry().exists();
+      return hasEmail()
+             && exists(/databases/$(database)/documents/allowedUsers/$(userEmail()));
+    }
+
+    function userRoles() {
+      return get(/databases/$(database)/documents/allowedUsers/$(userEmail())).data;
     }
 
     function hasRole(role) {
-      return isAllowedUser() && userEntry().data[role] == true;
-    }
-
-    function isGoogleUser() {
-      return signedIn()
-             && request.auth.token.firebase != null
-             && request.auth.token.firebase.sign_in_provider == 'google.com';
+      return isAllowedUser() && userRoles().get(role, false) == true;
     }
 
     function isAdministration() {
@@ -40,20 +45,91 @@ service cloud.firestore {
       return hasRole('participants') && isGoogleUser();
     }
 
+    function hasResultUser() {
+      return isAuthenticated()
+             && exists(/databases/$(database)/documents/allowedResultUsers/$(request.auth.uid));
+    }
+
+    function resultRoles() {
+      return get(/databases/$(database)/documents/allowedResultUsers/$(request.auth.uid)).data;
+    }
+
+    function hasResultRole(role) {
+      return hasResultUser() && resultRoles().get(role, false) == true;
+    }
+
+    function hasGrantedResultAccess() {
+      return hasResultRole('results_start') || hasResultRole('results_finish');
+    }
+
+    function canManageStation(stationId) {
+      return (stationId == 'start' && hasResultRole('results_start'))
+             || (stationId == 'finish' && hasResultRole('results_finish'));
+    }
+
     match /allowedUsers/{email} {
-      allow get: if signedIn() && lower(email) == userEmail();
+      allow get: if hasEmail() && lower(email) == userEmail();
       allow list: if isAdministration();
       allow create, update, delete: if isAdministration();
     }
 
     match /accessRequests/{email} {
-      allow create: if signedIn()
+      allow create: if hasEmail()
                     && lower(email) == userEmail()
                     && lower(request.resource.data.email) == userEmail()
                     && request.resource.data.status == 'pending';
-      allow get: if isAdministration() || (signedIn() && lower(email) == userEmail());
+      allow get: if isAdministration() || (hasEmail() && lower(email) == userEmail());
       allow list: if isAdministration();
       allow update, delete: if isAdministration();
+    }
+
+    match /allowedResultUsers/{uid} {
+      allow get: if isAdministration() || (isAuthenticated() && uid == request.auth.uid);
+      allow list: if isAdministration();
+      allow create, update, delete: if isAdministration();
+    }
+
+    match /resultAccessRequests/{uid} {
+      allow create, update: if isAuthenticated()
+                            && uid == request.auth.uid
+                            && request.resource.data.uid == request.auth.uid
+                            && request.resource.data.status == 'pending';
+      allow get: if isAdministration() || (isAuthenticated() && uid == request.auth.uid);
+      allow list: if isAdministration();
+      allow update, delete: if isAdministration();
+    }
+
+    match /resultStations/{stationId} {
+      allow read: if isAdministration() || hasGrantedResultAccess();
+      allow create, update: if canManageStation(stationId)
+                            && request.resource.data.assignedUid == request.auth.uid
+                            && (!exists(/databases/$(database)/documents/resultStations/$(stationId))
+                                || resource.data.assignedUid == request.auth.uid);
+      allow delete: if isAdministration()
+                    || (canManageStation(stationId)
+                        && resource.data.assignedUid == request.auth.uid);
+    }
+
+    match /currentCompetitor/{docId} {
+      allow read: if isAdministration() || hasGrantedResultAccess();
+      allow create, update: if docId == 'current' && hasResultRole('results_start');
+      allow delete: if docId == 'current' && (hasResultRole('results_start') || hasResultRole('results_finish'));
+    }
+
+    match /resultEvents/{eventId} {
+      allow read: if isAdministration() || hasGrantedResultAccess();
+      allow create: if hasGrantedResultAccess();
+      allow update, delete: if false;
+    }
+
+    match /resultRuns/{runId} {
+      allow read: if isAllowedUser() || hasGrantedResultAccess();
+      allow create, update: if hasGrantedResultAccess();
+      allow delete: if isAdministration();
+    }
+
+    match /clockChecks/{uid} {
+      allow read, write: if isAuthenticated() && uid == request.auth.uid;
     }
 
     match /config/streams {
@@ -62,17 +138,15 @@ service cloud.firestore {
     }
 
     match /participants/{participantId} {
-      allow read: if isAllowedUser();
+      allow read: if isAllowedUser() || hasGrantedResultAccess();
       allow write: if isParticipants();
     }
 
     match /races/{raceId} {
-      allow read: if isAllowedUser();
-      allow write: if hasRole('results');
+      allow read, write: if false;
 
       match /results/{resultId} {
-        allow read: if isAllowedUser();
-        allow write: if hasRole('results');
+        allow read, write: if false;
       }
     }
   }

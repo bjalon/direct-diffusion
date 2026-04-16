@@ -1456,3 +1456,221 @@ html, body, #root {
   flex: 1;
   min-height: 0;
 }
+
+.admin-uid {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── Results workflow ── */
+.results-shell {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(24,119,242,0.14), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(76,175,80,0.1), transparent 28%),
+    var(--bg);
+}
+
+.results-shell-card {
+  width: min(720px, 100%);
+  background: rgba(19, 19, 32, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 28px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.results-shell-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.results-shell-title {
+  font-size: 28px;
+  line-height: 1.1;
+  letter-spacing: -0.8px;
+  color: var(--text);
+}
+
+.results-shell-subtitle {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.results-loading-block {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.results-status-card,
+.results-action-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.results-status-line {
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.results-big-name {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.9px;
+  color: var(--text);
+  text-align: center;
+}
+
+.results-toolbar {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.results-station-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.results-station-card {
+  padding: 22px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+
+.results-station-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(24,119,242,0.45);
+  background: rgba(24,119,242,0.08);
+}
+
+.results-station-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
+}
+
+.results-station-title {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.results-station-subtitle {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.results-participant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 58vh;
+  overflow-y: auto;
+}
+
+.results-participant-button {
+  width: 100%;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.results-participant-button:hover {
+  border-color: rgba(24,119,242,0.45);
+  background: rgba(24,119,242,0.08);
+}
+
+.results-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.results-big-button {
+  min-height: 124px;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 800;
+  border-radius: 18px;
+}
+
+.results-big-button--success {
+  background: #1f8f4f;
+}
+
+.results-big-button--success:hover {
+  background: #187240;
+}
+
+.results-next-button {
+  justify-content: center;
+  min-height: 54px;
+  font-size: 16px;
+}
+
+@media (max-width: 640px) {
+  .results-shell {
+    padding: 16px;
+  }
+
+  .results-shell-card {
+    padding: 20px;
+  }
+
+  .results-big-name {
+    font-size: 26px;
+  }
+
+  .results-action-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .results-big-button {
+    min-height: 96px;
+    font-size: 22px;
+  }
+
+  .results-toolbar {
+    justify-content: stretch;
+  }
+
+  .results-toolbar .btn {
+    flex: 1;
+    justify-content: center;
+  }
+}

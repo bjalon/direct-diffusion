@@ -1,12 +1,12 @@
 # Direct Diffusion
 
-Direct Diffusion is a React and Firebase application built to manage and display multiple live video feeds during events. It combines a display wall, a stream configuration UI, participant management, results entry, and an administration area for access control.
+Direct Diffusion is a React and Firebase application built to manage and display multiple live video feeds during events. It combines a display wall, a stream configuration UI, participant management, a dedicated start/finish operator flow, and an administration area for access control.
 
 The project is designed for lightweight operations on event day:
 
 - a public-facing display view for multi-stream broadcasting
 - a configuration area for assigning streams to screen slots
-- participant and results management for races or competitions
+- participant management and lightweight result capture for competitions
 - Firebase-backed authentication and role-based access control
 - an administration view to manage access requests and authorized users
 
@@ -17,10 +17,13 @@ The application is split into a few functional areas:
 - `Affichage`: live display grid for the configured streams
 - `Flux`: stream library, layout selection, and slot assignment
 - `Participants`: participant registry
-- `Résultats`: race management and time entry
+- `Résultats`: dedicated start/finish operator workflow
 - `Admin`: access requests and role assignment for authorized administrators
 
-The UI is built with React and Vite. Application data is stored in Firestore. Authentication uses Firebase Auth with Google sign-in and email magic links.
+The UI is built with React and Vite. Application data is stored in Firestore. Authentication uses Firebase Auth with two distinct flows:
+
+- Google OAuth for administration, stream management, and participant management
+- Firebase anonymous auth for the `/results` operator workflow
 
 ## Features
 
@@ -29,9 +32,9 @@ The UI is built with React and Vite. Application data is stored in Firestore. Au
 - Virtual display blocks for ranking and race summaries
 - Real-time Firestore synchronization
 - Local persistence of display layout and slot mapping
-- Participant ordering and race result entry
+- Participant ordering and start/finish result capture
 - Role-based feature visibility
-- Access request workflow for non-authorized users
+- Separate access request workflows for Google users and result operators
 
 ## Tech Stack
 
@@ -127,12 +130,11 @@ Application access is controlled through Firestore documents stored in:
 allowedUsers/{email}
 ```
 
-Each document may contain these role flags:
+Each Google-authorized document may contain these role flags:
 
 - `administration`
 - `admin_flux`
 - `participants`
-- `results`
 
 Behavior:
 
@@ -140,18 +142,39 @@ Behavior:
 - `administration` allows access to the admin page and modification of `allowedUsers`
 - `admin_flux` allows editing the stream configuration stored in Firestore
 - `participants` allows editing the participants collection
-- `results` allows editing races and race results
 
 Sensitive roles are restricted to Google OAuth in Firestore rules:
 
 - `administration` requires the `google.com` sign-in provider
 - `admin_flux` requires the `google.com` sign-in provider
 - `participants` requires the `google.com` sign-in provider
-- `results` does not require Google OAuth
+
+## Result Operator Access
+
+The `/results` page uses Firebase anonymous auth by default and stores operator rights by Firebase `uid`.
+
+Dedicated operator capabilities are stored in:
+
+```text
+allowedResultUsers/{uid}
+```
+
+Supported result capabilities:
+
+- `results_start`
+- `results_finish`
+
+When a result operator is not yet approved, the page asks for an email and creates a request in:
+
+```text
+resultAccessRequests/{uid}
+```
+
+This keeps the access decision attached to a stable Firebase identity while still allowing a lightweight operator flow on shared field devices.
 
 ## Access Requests
 
-When an authenticated user is not present in `allowedUsers`, the application shows an access denied screen and allows them to create a request in:
+When an authenticated Google user is not present in `allowedUsers`, the application shows an access denied screen and allows them to create a request in:
 
 ```text
 accessRequests/{email}
@@ -170,11 +193,30 @@ Main collections used by the app:
 ```text
 allowedUsers/{email}
 accessRequests/{email}
+allowedResultUsers/{uid}
+resultAccessRequests/{uid}
+resultStations/{start|finish}
+currentCompetitor/current
+resultEvents/{clickId}
+resultRuns/{runId}
+clockChecks/{uid}
 config/streams
 participants/{participantId}
-races/{raceId}
-races/{raceId}/results/{resultId}
 ```
+
+### Result Timing Workflow
+
+The result workflow is intentionally simple:
+
+1. open `/results`
+2. verify browser clock drift against Firestore server time
+3. authenticate anonymously if needed
+4. request access by entering an email
+5. wait for admin approval on the matching Firebase `uid`
+6. claim either the `start` or `finish` station
+7. operate the station in real time using Firestore subscriptions
+
+Start clicks are buffered locally in the browser before synchronization. Once synced, each click is written as an immutable Firestore event with a server-side sync timestamp.
 
 ## Firestore Rules
 
@@ -218,6 +260,7 @@ This command reads `firebase.json`, which points to `resources/firestore.rules`.
 - review the rule diff before deployment
 - keep at least one existing user with the `administration` role
 - validate the admin UI after each rules update
+- validate `/results` with one start station and one finish station after each rules update
 
 ## Front-End Deployment
 
@@ -251,7 +294,7 @@ The application uses `HashRouter`, which keeps GitHub Pages hosting simple.
 
 ### Local Persistence
 
-Layout and slot assignments are stored in browser local storage. Streams, participants, races, results, access requests, and allowed users live in Firestore.
+Layout and slot assignments are stored in browser local storage. The start station also uses local storage as a temporary click buffer before sync. Streams, participants, access requests, result events, result runs, and authorized users live in Firestore.
 
 ## Security Model
 

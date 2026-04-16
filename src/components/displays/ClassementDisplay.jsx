@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { subscribeRaces, fetchResults } from '../../firebase/races';
+import { subscribeResultRuns } from '../../firebase/results';
 import { parseTime } from '../../utils/time';
 
 const MEDALS = ['#f5c518', '#b8c0cc', '#cd7f32'];
@@ -8,26 +8,18 @@ export default function ClassementDisplay() {
   const [classement, setClassement] = useState([]);
 
   useEffect(() => {
-    return subscribeRaces(async (races) => {
-      const finished = races.filter((r) => r.finished);
-      if (finished.length === 0) { setClassement([]); return; }
-
-      // Fetch results for all finished races
-      const allResults = (
-        await Promise.all(finished.map((r) => fetchResults(r.id)))
-      ).flat();
-
-      // Best time per participant
+    return subscribeResultRuns((runs) => {
+      const finished = runs.filter((run) => run.status === 'finished' && run.durationLabel);
       const best = {};
-      allResults.forEach((r) => {
-        const t = parseTime(r.time);
-        if (!best[r.participantId] || t < parseTime(best[r.participantId].time)) {
-          best[r.participantId] = r;
+      finished.forEach((run) => {
+        const t = parseTime(run.durationLabel);
+        if (!best[run.participantId] || t < parseTime(best[run.participantId].durationLabel)) {
+          best[run.participantId] = run;
         }
       });
 
       setClassement(
-        Object.values(best).sort((a, b) => parseTime(a.time) - parseTime(b.time)),
+        Object.values(best).sort((a, b) => parseTime(a.durationLabel) - parseTime(b.durationLabel)),
       );
     });
   }, []);
@@ -50,7 +42,7 @@ export default function ClassementDisplay() {
             >
               <span className="vd-rank">{i + 1}</span>
               <span className="vd-name">{entry.participantLabel}</span>
-              <span className="vd-time">{entry.time}</span>
+              <span className="vd-time">{entry.durationLabel}</span>
             </div>
           ))}
         </div>
