@@ -1,9 +1,7 @@
-import { LAYOUTS } from '../utils/storage';
-
-export default function LayoutPicker({ selected, onChange }) {
+export default function LayoutPicker({ selected, onChange, layouts }) {
   return (
     <div className="layout-picker">
-      {Object.entries(LAYOUTS).map(([key, layout]) => (
+      {Object.entries(layouts).map(([key, layout]) => (
         <button
           key={key}
           className={`layout-option${selected === key ? ' selected' : ''}`}

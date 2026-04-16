@@ -1,8 +1,9 @@
-import { LAYOUTS } from '../utils/storage';
+import { getLayouts } from '../utils/storage';
 import VideoCell from '../components/VideoCell';
 
 export default function DisplayPage({ config }) {
-  const layout = LAYOUTS[config.layout] ?? LAYOUTS['1'];
+  const layouts = getLayouts();
+  const layout = layouts[config.layout] ?? layouts['1'];
   const { cols, rows, placements } = layout;
 
   const getStream = (slotIndex) => {

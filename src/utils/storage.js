@@ -1,12 +1,15 @@
 function defineLayout({
+  id,
   label,
   cols,
   rows,
   placements,
   previewCols = cols,
   previewRows = rows,
+  custom = false,
 }) {
   return {
+    id,
     label,
     cols,
     rows,
@@ -14,47 +17,41 @@ function defineLayout({
     placements,
     previewCols,
     previewRows,
+    custom,
   };
 }
 
-export const LAYOUTS = {
+export const BUILTIN_LAYOUTS = {
   '1': defineLayout({
+    id: '1',
     label: '1 flux',
     cols: 1,
     rows: 1,
     placements: [{ col: 1, row: 1 }],
   }),
   '1x2': defineLayout({
+    id: '1x2',
     label: '2 cote a cote',
     cols: 2,
     rows: 1,
     placements: [{ col: 1, row: 1 }, { col: 2, row: 1 }],
   }),
   '2x1': defineLayout({
+    id: '2x1',
     label: '2 empiles',
     cols: 1,
     rows: 2,
     placements: [{ col: 1, row: 1 }, { col: 1, row: 2 }],
   }),
   '1x3': defineLayout({
+    id: '1x3',
     label: '3 cote a cote',
     cols: 3,
     rows: 1,
     placements: [{ col: 1, row: 1 }, { col: 2, row: 1 }, { col: 3, row: 1 }],
   }),
-  'landscape-top-3': defineLayout({
-    label: '3 paysages haut',
-    cols: 6,
-    rows: 3,
-    placements: [
-      { col: 1, row: 1, colSpan: 2, rowSpan: 2 },
-      { col: 3, row: 1, colSpan: 2, rowSpan: 2 },
-      { col: 5, row: 1, colSpan: 2, rowSpan: 2 },
-    ],
-    previewCols: 6,
-    previewRows: 3,
-  }),
   'landscape-center-3': defineLayout({
+    id: 'landscape-center-3',
     label: '3 paysages centres',
     cols: 6,
     rows: 2,
@@ -64,25 +61,15 @@ export const LAYOUTS = {
       { col: 5, row: 1, colSpan: 2, rowSpan: 2 },
     ],
   }),
-  'landscape-bottom-3': defineLayout({
-    label: '3 paysages bas',
-    cols: 6,
-    rows: 3,
-    placements: [
-      { col: 1, row: 2, colSpan: 2, rowSpan: 2 },
-      { col: 3, row: 2, colSpan: 2, rowSpan: 2 },
-      { col: 5, row: 2, colSpan: 2, rowSpan: 2 },
-    ],
-    previewCols: 6,
-    previewRows: 3,
-  }),
   '3x1': defineLayout({
+    id: '3x1',
     label: '3 empiles',
     cols: 1,
     rows: 3,
     placements: [{ col: 1, row: 1 }, { col: 1, row: 2 }, { col: 1, row: 3 }],
   }),
   '2x2': defineLayout({
+    id: '2x2',
     label: '4 flux (2x2)',
     cols: 2,
     rows: 2,
@@ -94,6 +81,7 @@ export const LAYOUTS = {
     ],
   }),
   'portrait-left-3-landscapes': defineLayout({
+    id: 'portrait-left-3-landscapes',
     label: 'Portrait gauche + 3 paysages',
     cols: 7,
     rows: 3,
@@ -105,6 +93,7 @@ export const LAYOUTS = {
     ],
   }),
   'portrait-right-3-landscapes': defineLayout({
+    id: 'portrait-right-3-landscapes',
     label: '3 paysages + portrait droite',
     cols: 7,
     rows: 3,
@@ -116,6 +105,7 @@ export const LAYOUTS = {
     ],
   }),
   'portrait-center-3-landscapes': defineLayout({
+    id: 'portrait-center-3-landscapes',
     label: '3 paysages + portrait centre',
     cols: 5,
     rows: 3,
@@ -126,20 +116,8 @@ export const LAYOUTS = {
       { col: 3, row: 1, rowSpan: 3, colSpan: 2 },
     ],
   }),
-  'portrait-band-top-3-landscapes': defineLayout({
-    label: 'Portrait haut + 3 paysages',
-    cols: 6,
-    rows: 4,
-    placements: [
-      { col: 3, row: 1, colSpan: 2, rowSpan: 2 },
-      { col: 1, row: 3, colSpan: 2, rowSpan: 2 },
-      { col: 3, row: 3, colSpan: 2, rowSpan: 2 },
-      { col: 5, row: 3, colSpan: 2, rowSpan: 2 },
-    ],
-    previewCols: 6,
-    previewRows: 4,
-  }),
   'double-portrait-left-3-landscapes': defineLayout({
+    id: 'double-portrait-left-3-landscapes',
     label: '2 portraits gauche + 3 paysages',
     cols: 8,
     rows: 3,
@@ -152,6 +130,7 @@ export const LAYOUTS = {
     ],
   }),
   'double-portrait-right-3-landscapes': defineLayout({
+    id: 'double-portrait-right-3-landscapes',
     label: '3 paysages + 2 portraits droite',
     cols: 8,
     rows: 3,
@@ -164,6 +143,7 @@ export const LAYOUTS = {
     ],
   }),
   'double-portrait-sides-3-landscapes': defineLayout({
+    id: 'double-portrait-sides-3-landscapes',
     label: '1 portrait gauche + 3 paysages + 1 portrait droite',
     cols: 9,
     rows: 3,
@@ -175,129 +155,73 @@ export const LAYOUTS = {
       { col: 9, row: 1, rowSpan: 3 },
     ],
   }),
-  '3x2': defineLayout({
-    label: '6 flux (3x2)',
-    cols: 3,
-    rows: 2,
-    placements: [
-      { col: 1, row: 1 },
-      { col: 2, row: 1 },
-      { col: 3, row: 1 },
-      { col: 1, row: 2 },
-      { col: 2, row: 2 },
-      { col: 3, row: 2 },
-    ],
-  }),
-  '2x3': defineLayout({
-    label: '6 flux (2x3)',
-    cols: 2,
-    rows: 3,
-    placements: [
-      { col: 1, row: 1 },
-      { col: 2, row: 1 },
-      { col: 1, row: 2 },
-      { col: 2, row: 2 },
-      { col: 1, row: 3 },
-      { col: 2, row: 3 },
-    ],
-  }),
-  'hero-left-2': defineLayout({
-    label: 'Hero + 2',
-    cols: 3,
-    rows: 2,
-    placements: [
-      { col: 1, row: 1, colSpan: 2, rowSpan: 2 },
-      { col: 3, row: 1 },
-      { col: 3, row: 2 },
-    ],
-  }),
-  'hero-top-2': defineLayout({
-    label: 'Hero haut + 2',
-    cols: 2,
-    rows: 3,
-    placements: [
-      { col: 1, row: 1, colSpan: 2, rowSpan: 2 },
-      { col: 1, row: 3 },
-      { col: 2, row: 3 },
-    ],
-  }),
-  'hero-left-4': defineLayout({
-    label: 'Hero + 4',
-    cols: 4,
-    rows: 2,
-    placements: [
-      { col: 1, row: 1, colSpan: 2, rowSpan: 2 },
-      { col: 3, row: 1 },
-      { col: 4, row: 1 },
-      { col: 3, row: 2 },
-      { col: 4, row: 2 },
-    ],
-  }),
-  'banner-top-3': defineLayout({
-    label: 'Bandeau + 3',
-    cols: 3,
-    rows: 2,
-    placements: [
-      { col: 1, row: 1, colSpan: 3 },
-      { col: 1, row: 2 },
-      { col: 2, row: 2 },
-      { col: 3, row: 2 },
-    ],
-  }),
-  'hero-right-2': defineLayout({
-    label: '2 petits + hero',
-    cols: 3,
-    rows: 2,
-    placements: [
-      { col: 1, row: 1 },
-      { col: 1, row: 2 },
-      { col: 2, row: 1, colSpan: 2, rowSpan: 2 },
-    ],
-  }),
-  'hero-center-4': defineLayout({
-    label: 'Hero centre + 4',
-    cols: 4,
-    rows: 3,
-    placements: [
-      { col: 1, row: 1, rowSpan: 2 },
-      { col: 4, row: 1 },
-      { col: 1, row: 3 },
-      { col: 4, row: 2, rowSpan: 2 },
-      { col: 2, row: 1, colSpan: 2, rowSpan: 3 },
-    ],
-  }),
-  'left-band-4': defineLayout({
-    label: 'Bandeau gauche + 4',
-    cols: 3,
-    rows: 4,
-    placements: [
-      { col: 1, row: 1, rowSpan: 4 },
-      { col: 2, row: 1, rowSpan: 2 },
-      { col: 3, row: 1, rowSpan: 2 },
-      { col: 2, row: 3, rowSpan: 2 },
-      { col: 3, row: 3, rowSpan: 2 },
-    ],
-  }),
-  'hero-mix-6': defineLayout({
-    label: 'Hero + 5 mixte',
-    cols: 4,
-    rows: 4,
-    placements: [
-      { col: 1, row: 1, colSpan: 2, rowSpan: 3 },
-      { col: 3, row: 1, colSpan: 2, rowSpan: 2 },
-      { col: 3, row: 3, colSpan: 2 },
-      { col: 1, row: 4 },
-      { col: 2, row: 4 },
-      { col: 3, row: 4, colSpan: 2 },
-    ],
-  }),
 };
 
 const STORAGE_KEY = 'direct-diffusion-config';
+const CUSTOM_LAYOUTS_KEY = 'direct-diffusion-custom-layouts';
+
+function normalizePlacement(raw) {
+  return {
+    col: Math.max(1, Number(raw.col) || 1),
+    row: Math.max(1, Number(raw.row) || 1),
+    colSpan: Math.max(1, Number(raw.colSpan) || 1),
+    rowSpan: Math.max(1, Number(raw.rowSpan) || 1),
+  };
+}
+
+function normalizeCustomLayout(id, raw) {
+  const placements = Array.isArray(raw?.placements)
+    ? raw.placements.map(normalizePlacement)
+    : [];
+
+  if (!raw?.label || !raw?.cols || !raw?.rows || placements.length === 0) {
+    return null;
+  }
+
+  return defineLayout({
+    id,
+    label: raw.label,
+    cols: Math.max(1, Number(raw.cols) || 1),
+    rows: Math.max(1, Number(raw.rows) || 1),
+    placements,
+    previewCols: Math.max(1, Number(raw.previewCols) || Number(raw.cols) || 1),
+    previewRows: Math.max(1, Number(raw.previewRows) || Number(raw.rows) || 1),
+    custom: true,
+  });
+}
+
+export function loadCustomLayouts() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_LAYOUTS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .map(([id, value]) => [id, normalizeCustomLayout(id, value)])
+        .filter(([, value]) => !!value),
+    );
+  } catch {
+    return {};
+  }
+}
+
+export function saveCustomLayouts(customLayouts) {
+  localStorage.setItem(CUSTOM_LAYOUTS_KEY, JSON.stringify(customLayouts));
+}
+
+export function getLayouts(customLayouts = loadCustomLayouts()) {
+  return { ...BUILTIN_LAYOUTS, ...customLayouts };
+}
+
+export function isCustomLayoutId(layoutId) {
+  return !!layoutId && !BUILTIN_LAYOUTS[layoutId];
+}
 
 function buildEnvDefault() {
   const layout = import.meta.env.VITE_DEFAULT_LAYOUT || '1';
-  const resolvedLayout = LAYOUTS[layout] ? layout : '1';
+  const resolvedLayout = BUILTIN_LAYOUTS[layout] ? layout : '1';
   return {
     layout: resolvedLayout,
     slots: {},
@@ -350,4 +274,8 @@ export function saveConfig({
 
 export function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+export function generateLayoutId() {
+  return `custom-layout-${generateId()}`;
 }

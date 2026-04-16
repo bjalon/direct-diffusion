@@ -13,6 +13,7 @@ import ConfigPage from './pages/ConfigPage';
 import DisplayPage from './pages/DisplayPage';
 import LoginPage from './pages/LoginPage';
 import ParticipantsPage from './pages/ParticipantsPage';
+import LayoutsPage from './pages/LayoutsPage';
 import ResultsAuditPage from './pages/ResultsAuditPage';
 import ResultsPage from './pages/ResultsPage';
 import { BUILTIN_VIRTUAL_STREAM } from './utils/virtualDisplay';
@@ -232,6 +233,20 @@ function AppShell({
                 onLogout={handleLogout}
               >
                 <ParticipantsPage canEdit={!!permissions?.participants} />
+              </RegularRoute>
+            )}
+          />
+          <Route
+            path="/layouts"
+            element={(
+              <RegularRoute
+                user={user}
+                permissions={permissions}
+                accessRequestState={accessRequestState}
+                setAccessRequestState={setAccessRequestState}
+                onLogout={handleLogout}
+              >
+                <LayoutsPage currentLayoutId={config.layout} />
               </RegularRoute>
             )}
           />

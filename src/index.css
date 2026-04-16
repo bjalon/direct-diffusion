@@ -586,6 +586,86 @@ html, body, #root {
   white-space: nowrap;
 }
 
+.layout-designer-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.layout-designer-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.layout-designer-head,
+.layout-zones-head,
+.layout-zone-card-head,
+.layout-designer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.layout-designer-list,
+.layout-zones-list,
+.layout-designer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.layout-designer-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.layout-designer-item.selected {
+  border-color: var(--accent);
+  background: rgba(24, 119, 242, 0.08);
+}
+
+.layout-designer-item-main {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.layout-designer-meta {
+  color: var(--muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.layout-zone-card {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.layout-zone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
 /* ── Slot assignment grid ── */
 .slot-grid {
   display: grid;
