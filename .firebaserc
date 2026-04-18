@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "prod": "qastia-direct-diffusion",
+    "integration": "qdd-integration",
+    "dev": "qdd-dev"
+  }
+}

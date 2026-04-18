@@ -232,7 +232,7 @@ Firebase CLI is configured through:
 
 ## Deploying Firestore Rules
 
-Firestore rules are intentionally deployed manually from a local workstation, not from CI.
+Firestore rules can be deployed locally for `dev` and `integration`, and are also deployed automatically by CI for `prod`.
 
 ### Install Firebase CLI
 
@@ -256,6 +256,20 @@ firebase deploy --only firestore:rules --project <your-firebase-project-id>
 
 This command reads `firebase.json`, which points to `resources/firestore.rules`.
 
+Project aliases are also available through [`.firebaserc`](/home/bjalon/projects/direct-diffusion/.firebaserc):
+
+- `prod`
+- `integration`
+- `dev`
+
+After replacing the two placeholder project IDs in `.firebaserc`, you can use:
+
+```bash
+npm run rules:deploy:prod
+npm run rules:deploy:integration
+npm run rules:deploy:dev
+```
+
 ### Recommended Safety Practice
 
 - always pass `--project`
@@ -275,6 +289,8 @@ That workflow builds the Vite app and publishes the `dist/` folder.
 Important:
 
 - GitHub Pages deployment is automated
+- production Firestore rules are also deployed automatically from CI on `main`
+- CI requires the GitHub secret `FIREBASE_SERVICE_ACCOUNT_PROD`
 - Firestore rules deployment is manual and local
 - these are intentionally separate concerns
 
