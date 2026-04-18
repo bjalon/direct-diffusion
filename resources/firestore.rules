@@ -120,19 +120,27 @@ service cloud.firestore {
     }
 
     function canCreateResultEvent() {
-      return request.resource.data.actorUid == request.auth.uid
-             && (
-               ((request.resource.data.type == 'start'
-                 && request.resource.data.station == 'start')
-                && (ownsCurrentStation('start') || canRecoverStartEventFromFinish()))
-               || (request.resource.data.type == 'finish'
-                   && request.resource.data.station == 'finish'
-                   && ownsCurrentStation('finish')
-                   && canFinishCurrentCompetitor())
-               || (request.resource.data.type == 'abandon'
-                   && request.resource.data.station == 'finish'
-                   && ownsCurrentStation('finish')
-                   && canAbandonCurrentCompetitor())
+      return (
+               request.resource.data.type == 'start'
+               && request.resource.data.station == 'start'
+               && canRecoverStartEventFromFinish()
+               && request.resource.data.actorUid == currentCompetitorData().selectedByUid
+             )
+             || (
+               request.resource.data.actorUid == request.auth.uid
+               && (
+                 (request.resource.data.type == 'start'
+                  && request.resource.data.station == 'start'
+                  && ownsCurrentStation('start'))
+                 || (request.resource.data.type == 'finish'
+                     && request.resource.data.station == 'finish'
+                     && ownsCurrentStation('finish')
+                     && canFinishCurrentCompetitor())
+                 || (request.resource.data.type == 'abandon'
+                     && request.resource.data.station == 'finish'
+                     && ownsCurrentStation('finish')
+                     && canAbandonCurrentCompetitor())
+               )
              );
     }
 

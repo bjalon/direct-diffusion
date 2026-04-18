@@ -37,7 +37,7 @@ const RESUME_EVENT_DEBOUNCE_MS = 750;
 
 export default function ResultsPage({ user, onLogout }) {
   const navigate = useNavigate();
-  const resumeVersion = useResultsResumeVersion();
+  useResultsResumeLifecycle();
   const [signInState, setSignInState] = useState('idle');
   const [clockState, setClockState] = useState({
     status: 'pending',
@@ -168,12 +168,12 @@ export default function ResultsPage({ user, onLogout }) {
           measuredAtClientMs: null,
         });
       });
-  }, [user?.uid, resumeVersion]);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!user || user === false) return;
     return subscribeResultAccess(user.uid, setResultAccess);
-  }, [user?.uid, resumeVersion]);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!user || user === false) return;
@@ -181,7 +181,7 @@ export default function ResultsPage({ user, onLogout }) {
       setResultRequest(request);
       if (request?.email) setRequestEmail(request.email);
     });
-  }, [user?.uid, resumeVersion]);
+  }, [user?.uid]);
 
   const canStart = !!resultAccess?.results_start;
   const canFinish = !!resultAccess?.results_finish;
@@ -215,17 +215,17 @@ export default function ResultsPage({ user, onLogout }) {
   useEffect(() => {
     if (!hasResultAccess) return;
     return subscribeCurrentCompetitor(setCurrentCompetitor);
-  }, [hasResultAccess, resumeVersion]);
+  }, [hasResultAccess]);
 
   useEffect(() => {
     if (!canStart) return;
     return subscribeParticipants(setParticipants);
-  }, [canStart, resumeVersion]);
+  }, [canStart]);
 
   useEffect(() => {
     if (!hasResultAccess) return;
     return subscribeResultEvents(setResultEvents);
-  }, [hasResultAccess, resumeVersion]);
+  }, [hasResultAccess]);
 
   useEffect(() => {
     const unsubs = [];
@@ -236,7 +236,7 @@ export default function ResultsPage({ user, onLogout }) {
       unsubs.push(subscribeStation('finish', (doc) => setStationDocs((prev) => ({ ...prev, finish: doc }))));
     }
     return () => unsubs.forEach((unsub) => unsub());
-  }, [canStart, canFinish, resumeVersion]);
+  }, [canStart, canFinish]);
 
   useEffect(() => {
     if (selectedStation || !actor?.uid || !user || user === false || !hasResultAccess) return;
@@ -322,7 +322,6 @@ export default function ResultsPage({ user, onLogout }) {
     canStart,
     canFinish,
     user,
-    resumeVersion,
   ]);
 
   useEffect(() => {
@@ -350,7 +349,7 @@ export default function ResultsPage({ user, onLogout }) {
         setStationError(getErrorLabel(error));
       },
     );
-  }, [selectedStation, expectedStationRelease, resumeVersion]);
+  }, [selectedStation, expectedStationRelease]);
 
   useEffect(() => {
     if (!selectedStation || !actor?.uid) return;
@@ -1780,8 +1779,7 @@ function stationLabel(station) {
   return station === 'finish' ? 'arrivée' : 'départ';
 }
 
-function useResultsResumeVersion() {
-  const [resumeVersion, setResumeVersion] = useState(0);
+function useResultsResumeLifecycle() {
   const lastResumeAtRef = useRef(0);
 
   useEffect(() => {
@@ -1794,11 +1792,10 @@ function useResultsResumeVersion() {
       if (now - lastResumeAtRef.current < RESUME_EVENT_DEBOUNCE_MS) return;
       lastResumeAtRef.current = now;
 
-      log.info('results page resumed; refreshing firestore listeners', { reason, resumedAtMs: now });
+      log.info('results page resumed; ensuring firestore network', { reason, resumedAtMs: now });
       ensureFirestoreOnline().catch((error) => {
         log.warn('failed to ensure firestore network after resume', { reason, error });
       });
-      setResumeVersion((value) => value + 1);
     };
 
     const handleVisibilityChange = () => {
@@ -1806,24 +1803,19 @@ function useResultsResumeVersion() {
         handleResume('visibilitychange');
       }
     };
-    const handleFocus = () => handleResume('focus');
     const handleOnline = () => handleResume('online');
     const handlePageShow = (event) => handleResume(event.persisted ? 'pageshow-persisted' : 'pageshow');
 
     window.addEventListener('pageshow', handlePageShow);
-    window.addEventListener('focus', handleFocus);
     window.addEventListener('online', handleOnline);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('pageshow', handlePageShow);
-      window.removeEventListener('focus', handleFocus);
       window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
-
-  return resumeVersion;
 }
 
 function statusLabel(status) {
