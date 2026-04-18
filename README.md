@@ -102,6 +102,10 @@ npm run preview
 
 The application reads its runtime configuration from Vite environment variables.
 
+For the complete setup of the `prod`, `integration`, and `dev` Firebase projects, plus GitHub Pages and CI secrets, see:
+
+- [resources/README.md](/home/bjalon/projects/direct-diffusion/resources/README.md)
+
 The repository currently includes a base `.env` file. For local overrides, use `.env.local`.
 
 Required variables:
