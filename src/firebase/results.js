@@ -540,14 +540,11 @@ export async function completeCurrentCompetitor({ actor, click }) {
   }
 
   const current = currentSnap.data();
-  const pendingStartClicks = Array.isArray(current.pendingStartClicks) ? current.pendingStartClicks : [];
-  const latestPendingStart = pendingStartClicks[pendingStartClicks.length - 1] ?? null;
-
-  if (!latestPendingStart && !Number.isFinite(current.latestStartAtClientMs)) {
-    throw new Error('no-start-click');
+  if (current.status !== 'running' || !Number.isFinite(current.latestStartAtClientMs)) {
+    throw new Error('start-not-synced');
   }
 
-  const startReference = latestPendingStart ?? {
+  const startReference = {
     clickId: current.latestStartClickId,
     clickedAtClientMs: current.latestStartAtClientMs,
     clickedAtClientIso: current.latestStartAtClientIso,
@@ -559,27 +556,6 @@ export async function completeCurrentCompetitor({ actor, click }) {
 
   const durationLabel = durationMs == null ? null : formatDurationMs(durationMs);
   const batch = writeBatch(db);
-
-  pendingStartClicks.forEach((startClick) => {
-    batch.set(RESULT_EVENT(startClick.clickId), {
-      clickId: startClick.clickId,
-      runId: current.runId,
-      startId: current.startId,
-      courseId: current.courseId,
-      courseLabel: current.courseLabel,
-      participantId: current.participantId,
-      participantLabel: current.participantLabel,
-      type: 'start',
-      station: 'start',
-      active: true,
-      actorUid: current.startedByUid || current.selectedByUid,
-      actorEmail: current.startedByEmail || current.selectedByEmail || '',
-      actorProviderId: actor.providerId ?? 'anonymous',
-      clickedAtClientMs: startClick.clickedAtClientMs,
-      clickedAtClientIso: startClick.clickedAtClientIso,
-      syncedAtServer: serverTimestamp(),
-    }, { merge: true });
-  });
 
   batch.set(RESULT_EVENT(click.clickId), {
     clickId: click.clickId,
@@ -646,41 +622,17 @@ export async function abandonCurrentCompetitor({ actor, click }) {
   }
 
   const current = currentSnap.data();
-  const pendingStartClicks = Array.isArray(current.pendingStartClicks) ? current.pendingStartClicks : [];
-  const latestPendingStart = pendingStartClicks[pendingStartClicks.length - 1] ?? null;
-
-  if (!latestPendingStart && !Number.isFinite(current.latestStartAtClientMs)) {
-    throw new Error('no-start-click');
+  if (current.status !== 'running' || !Number.isFinite(current.latestStartAtClientMs)) {
+    throw new Error('start-not-synced');
   }
 
-  const startReference = latestPendingStart ?? {
+  const startReference = {
     clickId: current.latestStartClickId,
     clickedAtClientMs: current.latestStartAtClientMs,
     clickedAtClientIso: current.latestStartAtClientIso,
   };
 
   const batch = writeBatch(db);
-
-  pendingStartClicks.forEach((startClick) => {
-    batch.set(RESULT_EVENT(startClick.clickId), {
-      clickId: startClick.clickId,
-      runId: current.runId,
-      startId: current.startId,
-      courseId: current.courseId,
-      courseLabel: current.courseLabel,
-      participantId: current.participantId,
-      participantLabel: current.participantLabel,
-      type: 'start',
-      station: 'start',
-      active: true,
-      actorUid: current.startedByUid || current.selectedByUid,
-      actorEmail: current.startedByEmail || current.selectedByEmail || '',
-      actorProviderId: actor.providerId ?? 'anonymous',
-      clickedAtClientMs: startClick.clickedAtClientMs,
-      clickedAtClientIso: startClick.clickedAtClientIso,
-      syncedAtServer: serverTimestamp(),
-    }, { merge: true });
-  });
 
   batch.set(RESULT_EVENT(click.clickId), {
     clickId: click.clickId,

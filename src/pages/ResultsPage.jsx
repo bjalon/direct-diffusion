@@ -1104,10 +1104,8 @@ function FinishStationView({
   onLogout,
   showUnavailableNotice,
 }) {
-  const startClickCount = Array.isArray(currentCompetitor?.pendingStartClicks)
-    ? currentCompetitor.pendingStartClicks.length
-    : 0;
-  const canFinishCurrent = startClickCount > 0 || Number.isFinite(currentCompetitor?.latestStartAtClientMs);
+  const canFinishCurrent = currentCompetitor?.status === 'running'
+    && Number.isFinite(currentCompetitor?.latestStartAtClientMs);
 
   return (
     <ResultsShell noHeader>
@@ -1135,7 +1133,7 @@ function FinishStationView({
           <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
           <div className="results-status-line">Start ID: <span className="admin-uid">{currentCompetitor.startId}</span></div>
           {!canFinishCurrent && (
-            <p className="login-subtitle">En attente du clic départ avant d’autoriser l’arrivée.</p>
+            <p className="login-subtitle">En attente de la synchronisation du départ par le poste départ.</p>
           )}
           {canFinishCurrent && (
             <>
@@ -1427,6 +1425,7 @@ function getErrorLabel(error) {
   if (error?.message === 'station-not-claimed') return 'Ce poste n’est plus réservé.';
   if (error?.message === 'current-competitor-busy') return 'Un concurrent est déjà en cours.';
   if (error?.message === 'no-current-competitor') return 'Aucun concurrent en cours.';
+  if (error?.message === 'start-not-synced') return 'Le départ doit être synchronisé par le poste départ avant de valider l’arrivée.';
   if (error?.message === 'clock-check-failed') return 'La source de temps n’a pas répondu.';
   return error?.code ? `Erreur : ${error.code}` : error?.message || 'Une erreur est survenue.';
 }

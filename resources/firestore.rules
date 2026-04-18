@@ -120,6 +120,26 @@ service cloud.firestore {
              && (!currentStationExists(docId) || currentStationOwnedByRequester(docId));
     }
 
+    function canCreateResultEvent() {
+      return request.resource.data.actorUid == request.auth.uid
+             && (
+               (request.resource.data.type == 'start'
+                && request.resource.data.station == 'start'
+                && ownsCurrentStation('start'))
+               || ((request.resource.data.type == 'finish' || request.resource.data.type == 'abandon')
+                   && request.resource.data.station == 'finish'
+                   && ownsCurrentStation('finish'))
+             );
+    }
+
+    function canCreateResultRun() {
+      return ownsCurrentStation('start');
+    }
+
+    function canUpdateResultRun() {
+      return ownsCurrentStation('start') || ownsCurrentStation('finish');
+    }
+
     function hasOnlyTvRole(data) {
       return data.get('tv', false) == true
              && data.get('results_start', false) == false
@@ -200,14 +220,15 @@ service cloud.firestore {
 
     match /resultEvents/{eventId} {
       allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
-      allow create: if isAdministration() || hasGrantedResultAccess();
+      allow create: if isAdministration() || canCreateResultEvent();
       allow update: if isAdministration();
       allow delete: if isAdministration();
     }
 
     match /resultRuns/{runId} {
       allow read: if isAllowedUser() || hasGrantedResultAccess() || hasTvAccess();
-      allow create, update: if isAdministration() || hasGrantedResultAccess();
+      allow create: if isAdministration() || canCreateResultRun();
+      allow update: if isAdministration() || canUpdateResultRun();
       allow delete: if isAdministration();
     }
 
