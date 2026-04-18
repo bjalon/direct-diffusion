@@ -14,8 +14,9 @@ import DisplayPage from './pages/DisplayPage';
 import LoginPage from './pages/LoginPage';
 import ParticipantsPage from './pages/ParticipantsPage';
 import LayoutsPage from './pages/LayoutsPage';
-import ResultsAuditPage from './pages/ResultsAuditPage';
 import ResultsArchivePage from './pages/ResultsArchivePage';
+import ResultsRunsPage from './pages/ResultsRunsPage';
+import ResultsViewerPage from './pages/ResultsViewerPage';
 import ResultsPage from './pages/ResultsPage';
 import AdminStreamsPage from './pages/AdminStreamsPage';
 import { BUILTIN_VIRTUAL_STREAM } from './utils/virtualDisplay';
@@ -153,12 +154,14 @@ export default function App() {
 
   const permissions = (() => {
     if (roles && roles !== false) {
+      const isAdministration = !!roles.administration && hasGoogleProvider(user);
       return {
-        administration: !!roles.administration && hasGoogleProvider(user),
+        administration: isAdministration,
         admin_flux: !!roles.admin_flux && hasGoogleProvider(user),
         streams_admin: (!!roles.admin_flux || !!roles.administration) && hasGoogleProvider(user),
         participants: !!roles.participants && hasGoogleProvider(user),
         tv: false,
+        results_view: isAdministration,
         identityLabel: user?.email || '',
       };
     }
@@ -170,6 +173,7 @@ export default function App() {
         streams_admin: false,
         participants: false,
         tv: true,
+        results_view: true,
         identityLabel: deviceAccess.email || user.uid,
       };
     }
@@ -348,7 +352,41 @@ function AppShell({
             )}
           />
           <Route
+            path="/results-view"
+            element={(
+              <RegularRoute
+                user={user}
+                permissions={permissions}
+                requiredRole="results_view"
+                accessRequestState={accessRequestState}
+                setAccessRequestState={setAccessRequestState}
+                onLogout={handleLogout}
+                deviceAccess={deviceAccess}
+                deviceRequest={deviceRequest}
+              >
+                <ResultsViewerPage />
+              </RegularRoute>
+            )}
+          />
+          <Route
             path="/results-admin"
+            element={(
+              <RegularRoute
+                user={user}
+                permissions={permissions}
+                requiredRole="results_view"
+                accessRequestState={accessRequestState}
+                setAccessRequestState={setAccessRequestState}
+                onLogout={handleLogout}
+                deviceAccess={deviceAccess}
+                deviceRequest={deviceRequest}
+              >
+                <Navigate to="/results-view" replace />
+              </RegularRoute>
+            )}
+          />
+          <Route
+            path="/results-runs"
             element={(
               <RegularRoute
                 user={user}
@@ -360,7 +398,7 @@ function AppShell({
                 deviceAccess={deviceAccess}
                 deviceRequest={deviceRequest}
               >
-                <ResultsAuditPage />
+                <ResultsRunsPage currentUser={user} />
               </RegularRoute>
             )}
           />

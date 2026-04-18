@@ -3,11 +3,12 @@ import { Link, useLocation } from 'react-router-dom';
 
 const ALL_LINKS = [
   { to: '/',             label: 'Affichage',    role: null },
+  { to: '/results-view', label: 'Résultats',    role: 'results_view' },
   { to: '/config',       label: 'Flux',         role: null },
   { to: '/streams-admin', label: 'Flux admin',  role: 'streams_admin' },
   { to: '/layouts',      label: 'Layouts',      role: null },
   { to: '/participants', label: 'Participants', role: 'participants' },
-  { to: '/results-admin', label: 'Résultats',   role: 'administration' },
+  { to: '/results-runs', label: 'Runs',         role: 'administration' },
   { to: '/admin',        label: 'Admin',        role: 'administration' },
   { to: '/results-archives', label: 'Archives', role: 'administration' },
 ];

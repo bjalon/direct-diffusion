@@ -77,6 +77,10 @@ function deserializeValue(value) {
   return value;
 }
 
+function createAdminEntityId(prefix) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 async function getCourseDocs(collectionName, courseId) {
   const snap = await getDocs(query(collection(db, collectionName), where('courseId', '==', courseId)));
   return snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
@@ -758,6 +762,206 @@ export function toggleResultEventActive(eventId, active) {
   return updateDoc(RESULT_EVENT(eventId), {
     active,
     updatedAt: serverTimestamp(),
+  });
+}
+
+export async function toggleResultRunActive({
+  runId,
+  officialStartClickId,
+  latestStartClickId,
+  finishClickId,
+  abandonClickId,
+  active,
+}) {
+  log.info('toggleResultRunActive', {
+    runId,
+    officialStartClickId,
+    latestStartClickId,
+    finishClickId,
+    abandonClickId,
+    active,
+  });
+
+  if (!runId) {
+    throw new Error('admin-run-missing-run-id');
+  }
+
+  const eventIds = [...new Set([
+    officialStartClickId,
+    latestStartClickId,
+    finishClickId,
+    abandonClickId,
+  ].filter(Boolean))];
+
+  const batch = writeBatch(db);
+  batch.set(RESULT_RUN(runId), {
+    active,
+    adminEditedAtServer: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  eventIds.forEach((eventId) => {
+    batch.set(RESULT_EVENT(eventId), {
+      active,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  });
+
+  await batch.commit();
+}
+
+export async function upsertAdminRun({
+  runId,
+  startId,
+  courseId,
+  courseLabel,
+  participantId,
+  participantLabel,
+  startAtClientMs,
+  terminalAtClientMs,
+  status = 'finished',
+  actor,
+}) {
+  log.info('upsertAdminRun start', {
+    runId,
+    startId,
+    courseId,
+    courseLabel,
+    participantId,
+    participantLabel,
+    startAtClientMs,
+    terminalAtClientMs,
+    status,
+    actor,
+  });
+
+  if (!courseId || !courseLabel || !participantLabel) {
+    throw new Error('admin-run-missing-fields');
+  }
+  if (!['finished', 'abandoned'].includes(status)) {
+    throw new Error('admin-run-invalid-status');
+  }
+  if (!Number.isFinite(startAtClientMs) || !Number.isFinite(terminalAtClientMs) || terminalAtClientMs <= startAtClientMs) {
+    throw new Error('admin-run-invalid-times');
+  }
+
+  const nextRunId = runId || createAdminEntityId('admin-run');
+  const nextStartId = startId || nextRunId;
+  const startClickId = createAdminEntityId(`admin-start-${nextRunId}`);
+  const terminalClickId = createAdminEntityId(`admin-${status === 'abandoned' ? 'abandon' : 'finish'}-${nextRunId}`);
+  const startAtClientIso = new Date(startAtClientMs).toISOString();
+  const terminalAtClientIso = new Date(terminalAtClientMs).toISOString();
+  const durationMs = status === 'finished' ? terminalAtClientMs - startAtClientMs : null;
+  const durationLabel = durationMs == null ? null : formatDurationMs(durationMs);
+
+  const existingEvents = await getDocs(query(collection(db, 'resultEvents'), where('runId', '==', nextRunId)));
+  const batch = writeBatch(db);
+
+  existingEvents.docs.forEach((entry) => {
+    batch.set(entry.ref, {
+      active: false,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  });
+
+  batch.set(RESULT_EVENT(startClickId), {
+    clickId: startClickId,
+    runId: nextRunId,
+    startId: nextStartId,
+    courseId,
+    courseLabel,
+    participantId: participantId || '',
+    participantLabel,
+    type: 'start',
+    station: 'start',
+    active: true,
+    actorUid: actor.uid,
+    actorEmail: actor.email ?? '',
+    actorProviderId: actor.providerId ?? 'google.com',
+    clickedAtClientMs: startAtClientMs,
+    clickedAtClientIso: startAtClientIso,
+    syncedAtServer: serverTimestamp(),
+    adminEditedAtServer: serverTimestamp(),
+  }, { merge: true });
+
+  batch.set(RESULT_EVENT(terminalClickId), {
+    clickId: terminalClickId,
+    runId: nextRunId,
+    startId: nextStartId,
+    courseId,
+    courseLabel,
+    participantId: participantId || '',
+    participantLabel,
+    type: status === 'abandoned' ? 'abandon' : 'finish',
+    station: 'finish',
+    active: true,
+    actorUid: actor.uid,
+    actorEmail: actor.email ?? '',
+    actorProviderId: actor.providerId ?? 'google.com',
+    clickedAtClientMs: terminalAtClientMs,
+    clickedAtClientIso: terminalAtClientIso,
+    syncedAtServer: serverTimestamp(),
+    adminEditedAtServer: serverTimestamp(),
+  }, { merge: true });
+
+  batch.set(RESULT_RUN(nextRunId), {
+    runId: nextRunId,
+    startId: nextStartId,
+    courseId,
+    courseLabel,
+    participantId: participantId || '',
+    participantLabel,
+    active: true,
+    status,
+    officialStartClickId: startClickId,
+    officialStartAtClientMs: startAtClientMs,
+    officialStartAtClientIso: startAtClientIso,
+    latestStartClickId: startClickId,
+    latestStartAtClientMs: startAtClientMs,
+    latestStartAtClientIso: startAtClientIso,
+    finishClickId: status === 'finished' ? terminalClickId : deleteField(),
+    finishAtClientMs: status === 'finished' ? terminalAtClientMs : deleteField(),
+    finishAtClientIso: status === 'finished' ? terminalAtClientIso : deleteField(),
+    abandonClickId: status === 'abandoned' ? terminalClickId : deleteField(),
+    abandonAtClientMs: status === 'abandoned' ? terminalAtClientMs : deleteField(),
+    abandonAtClientIso: status === 'abandoned' ? terminalAtClientIso : deleteField(),
+    startedByUid: actor.uid,
+    startedByEmail: actor.email ?? '',
+    finishedByUid: status === 'finished' ? actor.uid : deleteField(),
+    finishedByEmail: status === 'finished' ? actor.email ?? '' : deleteField(),
+    finishedAtServer: status === 'finished' ? serverTimestamp() : deleteField(),
+    abandonedByUid: status === 'abandoned' ? actor.uid : deleteField(),
+    abandonedByEmail: status === 'abandoned' ? actor.email ?? '' : deleteField(),
+    abandonedAtServer: status === 'abandoned' ? serverTimestamp() : deleteField(),
+    durationMs,
+    durationLabel,
+    pendingStartClicks: [],
+    adminEditedAtServer: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  await batch.commit();
+  return {
+    runId: nextRunId,
+    startId: nextStartId,
+    courseId,
+    courseLabel,
+    participantId: participantId || '',
+    participantLabel,
+    startAtClientMs,
+    terminalAtClientMs,
+    status,
+  };
+}
+
+export async function upsertAdminFinishedRun({
+  finishAtClientMs,
+  ...rest
+}) {
+  return upsertAdminRun({
+    ...rest,
+    status: 'finished',
+    terminalAtClientMs: finishAtClientMs,
   });
 }
 

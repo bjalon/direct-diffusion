@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { subscribeResultEvents, toggleResultEventActive } from '../firebase/results';
 import { formatEventTimestamp, sortEventsNewestFirst } from '../utils/resultsDerivation';
 
@@ -32,7 +33,14 @@ export default function ResultsAuditPage() {
   return (
     <div className="config-page">
       <section className="config-section">
-        <h2 className="section-title">Journal Résultats</h2>
+        <div className="admin-section-head">
+          <h2 className="section-title">Journal Résultats</h2>
+          <div className="admin-actions">
+            <Link className="btn btn-secondary btn-sm" to="/results-runs">
+              Corriger un run
+            </Link>
+          </div>
+        </div>
         <p className="hint">
           Tous les clics stockés dans Firebase. Désactivez un événement pour le retirer des affichages et des calculs.
         </p>
