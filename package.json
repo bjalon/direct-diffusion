@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --mode development",
+    "dev:integration": "vite --mode integration",
     "build": "vite build",
+    "build:integration": "vite build --mode integration",
     "preview": "vite preview",
     "rules:deploy:prod": "firebase deploy --only firestore:rules --project prod",
     "rules:deploy:integration": "firebase deploy --only firestore:rules --project integration",
