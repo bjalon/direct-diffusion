@@ -1213,8 +1213,9 @@ function FinishStationView({
 }) {
   const finishedCourses = useMemo(() => deriveFinishedCourses(resultEvents), [resultEvents]);
   const recentRuns = useMemo(() => deriveRunsFromEvents(resultEvents).slice(0, 3), [resultEvents]);
-  const canFinishCurrent = currentCompetitor?.status === 'running'
-    && Number.isFinite(currentCompetitor?.latestStartAtClientMs);
+  const hasLocalStart = Number.isFinite(currentCompetitor?.latestStartAtClientMs);
+  const canFinishCurrent = hasLocalStart;
+  const canAbandonCurrent = currentCompetitor?.status === 'running' && hasLocalStart;
   const activeCourse = useMemo(() => {
     if (currentCompetitor?.courseId) {
       return {
@@ -1262,11 +1263,15 @@ function FinishStationView({
         <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
         <div className="results-status-line">Start ID: <span className="admin-uid">{currentCompetitor.startId}</span></div>
         {!canFinishCurrent && (
-          <p className="login-subtitle">En attente de la synchronisation du départ par le poste départ.</p>
+          <p className="login-subtitle">En attente du clic départ sur le poste départ.</p>
         )}
         {canFinishCurrent && (
           <>
-            <p className="login-subtitle">Appuyez dès que le concurrent franchit l’arrivée.</p>
+            <p className="login-subtitle">
+              {canAbandonCurrent
+                ? 'Appuyez dès que le concurrent franchit l’arrivée.'
+                : 'Arrivée disponible immédiatement. Abandon disponible après validation du départ par le poste départ.'}
+            </p>
             <div className="results-action-grid">
               <button
                 className="btn btn-primary results-big-button results-big-button--success"
@@ -1295,7 +1300,7 @@ function FinishStationView({
               </button>
               <button
                 className="btn btn-danger results-big-button"
-                disabled={busyAction === 'finish' || busyAction === 'abandon'}
+                disabled={!canAbandonCurrent || busyAction === 'finish' || busyAction === 'abandon'}
                 onClick={async () => {
                   log.info('abandon click triggered', {
                     runId: currentCompetitor?.runId,
@@ -1795,7 +1800,7 @@ function getErrorLabel(error) {
   if (error?.message === 'station-not-claimed') return 'Ce poste n’est plus réservé.';
   if (error?.message === 'current-competitor-busy') return 'Un concurrent est déjà en cours.';
   if (error?.message === 'no-current-competitor') return 'Aucun concurrent en cours.';
-  if (error?.message === 'start-not-synced') return 'Le départ doit être synchronisé par le poste départ avant de valider l’arrivée.';
+  if (error?.message === 'start-not-synced') return 'Le départ n’est pas encore disponible pour cette action. L’abandon reste bloqué tant que le poste départ n’a pas validé Suivant.';
   if (error?.message === 'clock-check-failed') return 'La source de temps n’a pas répondu.';
   return error?.code ? `Erreur : ${error.code}` : error?.message || 'Une erreur est survenue.';
 }

@@ -531,6 +531,18 @@ export async function mirrorPendingStartClicks({ currentCompetitor, clicks, acto
   await batch.commit();
 }
 
+function hasLocalStart(current) {
+  return Number.isFinite(current?.latestStartAtClientMs);
+}
+
+function getStartReference(current) {
+  return {
+    clickId: current?.officialStartClickId || current?.latestStartClickId || null,
+    clickedAtClientMs: current?.officialStartAtClientMs ?? current?.latestStartAtClientMs ?? null,
+    clickedAtClientIso: current?.officialStartAtClientIso ?? current?.latestStartAtClientIso ?? null,
+  };
+}
+
 export async function completeCurrentCompetitor({ actor, click }) {
   log.info('completeCurrentCompetitor start', { actor, click });
   await assertStationOwned('finish', actor.uid);
@@ -540,15 +552,11 @@ export async function completeCurrentCompetitor({ actor, click }) {
   }
 
   const current = currentSnap.data();
-  if (current.status !== 'running' || !Number.isFinite(current.latestStartAtClientMs)) {
+  if (!hasLocalStart(current)) {
     throw new Error('start-not-synced');
   }
 
-  const startReference = {
-    clickId: current.latestStartClickId,
-    clickedAtClientMs: current.latestStartAtClientMs,
-    clickedAtClientIso: current.latestStartAtClientIso,
-  };
+  const startReference = getStartReference(current);
 
   const durationMs = Number.isFinite(startReference.clickedAtClientMs)
     ? Math.max(0, click.clickedAtClientMs - startReference.clickedAtClientMs)
@@ -556,6 +564,27 @@ export async function completeCurrentCompetitor({ actor, click }) {
 
   const durationLabel = durationMs == null ? null : formatDurationMs(durationMs);
   const batch = writeBatch(db);
+
+  if (!current.officialStartClickId && startReference.clickId) {
+    batch.set(RESULT_EVENT(startReference.clickId), {
+      clickId: startReference.clickId,
+      runId: current.runId,
+      startId: current.startId,
+      courseId: current.courseId,
+      courseLabel: current.courseLabel,
+      participantId: current.participantId,
+      participantLabel: current.participantLabel,
+      type: 'start',
+      station: 'start',
+      active: true,
+      actorUid: current.selectedByUid || '',
+      actorEmail: current.selectedByEmail || '',
+      actorProviderId: current.selectedByProviderId || 'anonymous',
+      clickedAtClientMs: startReference.clickedAtClientMs,
+      clickedAtClientIso: startReference.clickedAtClientIso,
+      syncedAtServer: serverTimestamp(),
+    }, { merge: true });
+  }
 
   batch.set(RESULT_EVENT(click.clickId), {
     clickId: click.clickId,
@@ -592,6 +621,8 @@ export async function completeCurrentCompetitor({ actor, click }) {
     finishClickId: click.clickId,
     finishAtClientMs: click.clickedAtClientMs,
     finishAtClientIso: click.clickedAtClientIso,
+    startedByUid: current.startedByUid || current.selectedByUid || '',
+    startedByEmail: current.startedByEmail || current.selectedByEmail || '',
     finishedByUid: actor.uid,
     finishedByEmail: actor.email ?? '',
     finishedAtServer: serverTimestamp(),
@@ -622,15 +653,11 @@ export async function abandonCurrentCompetitor({ actor, click }) {
   }
 
   const current = currentSnap.data();
-  if (current.status !== 'running' || !Number.isFinite(current.latestStartAtClientMs)) {
+  if (current.status !== 'running' || !hasLocalStart(current)) {
     throw new Error('start-not-synced');
   }
 
-  const startReference = {
-    clickId: current.latestStartClickId,
-    clickedAtClientMs: current.latestStartAtClientMs,
-    clickedAtClientIso: current.latestStartAtClientIso,
-  };
+  const startReference = getStartReference(current);
 
   const batch = writeBatch(db);
 

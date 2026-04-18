@@ -122,12 +122,17 @@ service cloud.firestore {
     function canCreateResultEvent() {
       return request.resource.data.actorUid == request.auth.uid
              && (
-               (request.resource.data.type == 'start'
-                && request.resource.data.station == 'start'
-                && ownsCurrentStation('start'))
-               || ((request.resource.data.type == 'finish' || request.resource.data.type == 'abandon')
+               ((request.resource.data.type == 'start'
+                 && request.resource.data.station == 'start')
+                && (ownsCurrentStation('start') || canRecoverStartEventFromFinish()))
+               || (request.resource.data.type == 'finish'
                    && request.resource.data.station == 'finish'
-                   && ownsCurrentStation('finish'))
+                   && ownsCurrentStation('finish')
+                   && canFinishCurrentCompetitor())
+               || (request.resource.data.type == 'abandon'
+                   && request.resource.data.station == 'finish'
+                   && ownsCurrentStation('finish')
+                   && canAbandonCurrentCompetitor())
              );
     }
 
@@ -136,7 +141,52 @@ service cloud.firestore {
     }
 
     function canUpdateResultRun() {
-      return ownsCurrentStation('start') || ownsCurrentStation('finish');
+      return ownsCurrentStation('start') || canUpdateResultRunFromFinish();
+    }
+
+    function currentCompetitorExists() {
+      return exists(/databases/$(database)/documents/currentCompetitor/current);
+    }
+
+    function currentCompetitorData() {
+      return get(/databases/$(database)/documents/currentCompetitor/current).data;
+    }
+
+    function currentCompetitorMatchesRequest() {
+      return currentCompetitorExists()
+             && request.resource.data.runId == currentCompetitorData().runId
+             && request.resource.data.startId == currentCompetitorData().startId;
+    }
+
+    function hasLocalStartForCurrentCompetitor() {
+      return currentCompetitorExists()
+             && currentCompetitorData().latestStartAtClientMs != null
+             && currentCompetitorData().latestStartClickId != null;
+    }
+
+    function canFinishCurrentCompetitor() {
+      return currentCompetitorMatchesRequest()
+             && hasLocalStartForCurrentCompetitor();
+    }
+
+    function canAbandonCurrentCompetitor() {
+      return canFinishCurrentCompetitor()
+             && currentCompetitorData().status == 'running';
+    }
+
+    function canRecoverStartEventFromFinish() {
+      return ownsCurrentStation('finish')
+             && currentCompetitorExists()
+             && request.resource.data.clickId == currentCompetitorData().latestStartClickId
+             && canFinishCurrentCompetitor();
+    }
+
+    function canUpdateResultRunFromFinish() {
+      return ownsCurrentStation('finish')
+             && (
+               (request.resource.data.status == 'finished' && canFinishCurrentCompetitor())
+               || (request.resource.data.status == 'abandoned' && canAbandonCurrentCompetitor())
+             );
     }
 
     function hasOnlyTvRole(data) {
