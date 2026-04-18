@@ -30,7 +30,7 @@ import {
   saveStartBuffer,
 } from '../utils/resultsBuffer';
 import { createLogger } from '../utils/logger';
-import { deriveFinishedCourses } from '../utils/resultsDerivation';
+import { deriveFinishedCourses, deriveGeneralRanking, deriveRunsFromEvents } from '../utils/resultsDerivation';
 
 const log = createLogger('ResultsPage');
 const RESUME_EVENT_DEBOUNCE_MS = 750;
@@ -68,6 +68,8 @@ export default function ResultsPage({ user, onLogout }) {
   const [depossessionNotice, setDepossessionNotice] = useState('');
   const [hadSelectedStationOwnership, setHadSelectedStationOwnership] = useState(false);
   const [expectedStationRelease, setExpectedStationRelease] = useState('');
+  const [resultsBrowserView, setResultsBrowserView] = useState('station');
+  const [resultsBrowserCourseId, setResultsBrowserCourseId] = useState('');
 
   const clearSelectedStationState = (nextStationError = '') => {
     setSelectedStation('');
@@ -75,6 +77,8 @@ export default function ResultsPage({ user, onLogout }) {
     setPendingStationSelection('');
     setStationState('idle');
     setHadSelectedStationOwnership(false);
+    setResultsBrowserView('station');
+    setResultsBrowserCourseId('');
     if (nextStationError) {
       setStationError(nextStationError);
     }
@@ -203,6 +207,8 @@ export default function ResultsPage({ user, onLogout }) {
       setStationState('idle');
       setStationRecoveryState('idle');
       setHadSelectedStationOwnership(false);
+      setResultsBrowserView('station');
+      setResultsBrowserCourseId('');
     }
   }, [hasResultAccess, resultRequest, resultAccess]);
 
@@ -217,9 +223,9 @@ export default function ResultsPage({ user, onLogout }) {
   }, [canStart, resumeVersion]);
 
   useEffect(() => {
-    if (!canStart) return;
+    if (!hasResultAccess) return;
     return subscribeResultEvents(setResultEvents);
-  }, [canStart, resumeVersion]);
+  }, [hasResultAccess, resumeVersion]);
 
   useEffect(() => {
     const unsubs = [];
@@ -453,6 +459,12 @@ export default function ResultsPage({ user, onLogout }) {
     setHadSelectedStationOwnership(false);
   }, [selectedStation]);
 
+  useEffect(() => {
+    if (selectedStation) return;
+    setResultsBrowserView('station');
+    setResultsBrowserCourseId('');
+  }, [selectedStation]);
+
   const handleClaimStation = async (station) => {
     if (!actor || !hasResultAccess) return;
     log.info('claiming station from results page', { station, actor });
@@ -640,6 +652,7 @@ export default function ResultsPage({ user, onLogout }) {
           title="Choix du poste"
           titleAside={actor?.email || 'poste anonyme'}
           subtitle="Sélectionnez le poste que vous allez tenir."
+          variant="chooser"
         >
           {stationError && <div className="form-error">{stationError}</div>}
           <div className="results-station-grid">
@@ -666,6 +679,35 @@ export default function ResultsPage({ user, onLogout }) {
     );
   }
 
+  if (resultsBrowserView !== 'station') {
+    return (
+      <>
+        <StationResultsBrowser
+          actor={actor}
+          station={selectedStation}
+          resultEvents={resultEvents}
+          browserView={resultsBrowserView}
+          setBrowserView={setResultsBrowserView}
+          selectedCourseId={resultsBrowserCourseId}
+          setSelectedCourseId={setResultsBrowserCourseId}
+          preferredCourseId={
+            currentCompetitor?.courseId
+            || currentCourse?.courseId
+            || stationDocs.start?.currentCourseId
+            || ''
+          }
+          preferredCourseLabel={
+            currentCompetitor?.courseLabel
+            || currentCourse?.courseLabel
+            || stationDocs.start?.currentCourseLabel
+            || ''
+          }
+        />
+        <ResultsNoticeDialog message={depossessionNotice} onConfirm={handleDepossessionConfirm} />
+      </>
+    );
+  }
+
   if (selectedStation === 'start') {
     return (
       <>
@@ -686,6 +728,7 @@ export default function ResultsPage({ user, onLogout }) {
           currentCourse={currentCourse}
           setCurrentCourse={setCurrentCourse}
           onActionError={resolveStationActionError}
+          onOpenResultsBrowser={() => setResultsBrowserView('menu')}
           onReleaseStation={handleReleaseSelectedStation}
           onLogout={handleResultsLogout}
           showUnavailableNotice={!depossessionNotice}
@@ -700,12 +743,14 @@ export default function ResultsPage({ user, onLogout }) {
       <FinishStationView
         actor={actor}
         ownsStation={selectedStationAssignment?.assignedUid === actor.uid}
+        resultEvents={resultEvents}
         currentCompetitor={currentCompetitor}
         busyAction={busyAction}
         setBusyAction={setBusyAction}
         actionError={actionError}
         setActionError={setActionError}
         onActionError={resolveStationActionError}
+        onOpenResultsBrowser={() => setResultsBrowserView('menu')}
         onReleaseStation={handleReleaseSelectedStation}
         onLogout={handleResultsLogout}
         showUnavailableNotice={!depossessionNotice}
@@ -732,6 +777,7 @@ function StartStationView({
   currentCourse,
   setCurrentCourse,
   onActionError,
+  onOpenResultsBrowser,
   onReleaseStation,
   onLogout,
   showUnavailableNotice,
@@ -741,10 +787,10 @@ function StartStationView({
   const isRunning = currentCompetitor?.status === 'running';
   const hasBufferedStart = startBuffer.length > 0;
   const canChangeCourse = !currentCompetitor && ownsStation;
-  const [emailPopoverOpen, setEmailPopoverOpen] = useState(false);
+  const finishedCourses = useMemo(() => deriveFinishedCourses(resultEvents), [resultEvents]);
   const currentCourseSummary = useMemo(
-    () => (currentCourse ? deriveFinishedCourses(resultEvents).find((course) => course.courseId === currentCourse.courseId) : null),
-    [currentCourse, resultEvents],
+    () => (currentCourse ? finishedCourses.find((course) => course.courseId === currentCourse.courseId) : null),
+    [currentCourse, finishedCourses],
   );
   const participantCounts = useMemo(
     () => (currentCourseSummary?.runs ?? []).reduce((acc, run) => {
@@ -810,456 +856,741 @@ function StartStationView({
 
   if (!currentCourse && !currentCompetitor) {
     return (
-      <ResultsShell
-        title="Poste départ"
-        titleAside={actor?.email || 'poste anonyme'}
-        subtitle="Nommer la course avant de sélectionner un participant."
-      >
-        <StationToolbar onReleaseStation={onReleaseStation} onLogout={onLogout} />
-        {actionError && <div className="form-error">{actionError}</div>}
-        <div className="results-course-setup-card">
-          <label className="form-label" htmlFor="course-name">Nom de la course</label>
-          <input
-            id="course-name"
-            className="form-input"
-            placeholder="Ex : Course 1"
-            value={courseDraft}
-            onChange={(e) => setCourseDraft(e.target.value)}
-            autoFocus
-          />
-          <div className="form-actions">
-            <button
-              className="btn btn-primary"
-              disabled={!courseDraft.trim() || busyAction === 'course'}
-              onClick={async () => {
-                const label = courseDraft.trim();
-                const nextCourse = {
-                  courseId: createCourseId(label),
-                  courseLabel: label,
-                };
-                setBusyAction('course');
-                setActionError('');
-                try {
-                  await setStartStationCourse({
-                    uid: actor.uid,
-                    courseId: nextCourse.courseId,
-                    courseLabel: nextCourse.courseLabel,
-                  });
-                  setCurrentCourse(nextCourse);
-                } catch (error) {
-                  log.error('setting start station course failed', error);
-                  onActionError(error, 'start');
-                } finally {
-                  setBusyAction('');
-                }
-              }}
-            >
-              {busyAction === 'course' ? 'Validation…' : 'Valider la course'}
-            </button>
-          </div>
-          {recentCourses.length > 0 && (
-            <div className="results-course-history">
-              <div className="results-course-history-title">Courses disponibles</div>
-              <div className="results-course-history-list">
-                {recentCourses.map((course) => (
-                  <button
-                    key={course.courseId}
-                    type="button"
-                    className="results-course-history-item"
-                    disabled={busyAction === 'course'}
-                    onClick={async () => {
-                      setBusyAction('course');
-                      setActionError('');
-                      try {
-                        await setStartStationCourse({
-                          uid: actor.uid,
-                          courseId: course.courseId,
-                          courseLabel: course.courseLabel,
-                        });
-                        setCurrentCourse({
-                          courseId: course.courseId,
-                          courseLabel: course.courseLabel,
-                        });
-                        setCourseDraft(course.courseLabel);
-                      } catch (error) {
-                        log.error('selecting existing course failed', error);
-                        onActionError(error, 'start');
-                      } finally {
-                        setBusyAction('');
-                      }
-                    }}
-                  >
-                    <span>{course.courseLabel}</span>
-                    {course.lastActivityMs === Number.MAX_SAFE_INTEGER && (
-                      <span className="results-course-history-badge">En cours</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
+      <ResultsShell noHeader variant="operator">
+        <StationSelectionScreen
+          title="Poste départ"
+          email={actor?.email || 'poste anonyme'}
+          actionError={actionError}
+          footerActions={(
+            <>
+              <button className="btn btn-secondary btn-sm" onClick={onReleaseStation}>
+                Libérer poste
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={onOpenResultsBrowser}>
+                Résultats
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={onLogout}>
+                Déconnexion
+              </button>
+            </>
           )}
-        </div>
-      </ResultsShell>
-    );
-  }
-
-  return (
-    <ResultsShell noHeader>
-      <StartStationHeader
-        email={actor.email || 'poste anonyme'}
-        courseLabel={currentCourse?.courseLabel || currentCompetitor?.courseLabel || '—'}
-        emailPopoverOpen={emailPopoverOpen}
-        onToggleEmail={() => setEmailPopoverOpen((value) => !value)}
-        onReleaseStation={onReleaseStation}
-        onChangeCourse={() => {
-          if (!canChangeCourse) return;
-          setBusyAction('change-course');
-          setActionError('');
-          setStartStationCourse({
-            uid: actor.uid,
-            courseId: null,
-            courseLabel: '',
-          })
-            .then(() => {
-              setCurrentCourse(null);
-              setCourseDraft('');
-            })
-            .catch((error) => {
-              log.error('clearing start station course failed', error);
-              onActionError(error, 'start');
-            })
-            .finally(() => {
-              setBusyAction('');
-            });
-        }}
-        onLogout={onLogout}
-        canChangeCourse={canChangeCourse && busyAction !== 'change-course'}
-      />
-
-      {actionError && <div className="form-error">{actionError}</div>}
-
-      {!ownsStation && showUnavailableNotice && (
-        <div className="results-status-card">
-          <div className="results-big-name">Poste non disponible</div>
-          <p className="login-subtitle">Ce poste départ n’est plus affecté à votre session. Les actions sont bloquées tant que vous ne reprenez pas le poste.</p>
-        </div>
-      )}
-
-      {!currentCompetitor && ownsStation && (
-        <div className="results-participant-list">
-          {participants.length === 0 && <div className="stream-empty">Aucun participant disponible.</div>}
-          {participants.map((participant) => (
-            <button
-              key={participant.id}
-              className={`results-participant-button${participantCounts[participant.id] ? ' results-participant-button--done' : ''}`}
-              disabled={busyAction !== '' || !currentCourse || !ownsStation}
-              onClick={async () => {
-                log.info('arming competitor from start station', {
-                  participantId: participant.id,
-                  participantLabel: participant.label,
-                  actorUid: actor.uid,
-                  course: currentCourse,
-                });
-                setBusyAction(`arm:${participant.id}`);
-                setActionError('');
-                try {
-                  const seed = createClickEntry();
-                  const runId = seed.clickId;
-                  const startId = seed.clickId;
-                  await armCurrentCompetitor({
-                    participant,
-                    actor,
-                    runId,
-                    startId,
-                    courseId: currentCourse.courseId,
-                    courseLabel: currentCourse.courseLabel,
-                    selectedAtClientMs: Date.now(),
-                  });
-                  clearStartBuffer(runId);
-                  setStartBuffer([]);
-                } catch (error) {
-                  log.error('arming competitor failed', error);
-                  await onActionError(error, 'start');
-                } finally {
-                  setBusyAction('');
-                }
-              }}
-            >
-              <span>{busyAction === `arm:${participant.id}` ? 'Préparation…' : participant.label}</span>
-              <span className="results-participant-pills">
-                {participantCounts[participant.id] ? (
-                  <span className="results-participant-pill">{participantCounts[participant.id]}</span>
-                ) : null}
-                {participantAbandonCounts[participant.id] ? (
-                  <span className="results-participant-pill results-participant-pill--danger">
-                    {participantAbandonCounts[participant.id]}
-                  </span>
-                ) : null}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {currentCompetitor && !ownsCurrent && (
-        <div className="results-status-card">
-          <div className="results-big-name">{currentCompetitor.participantLabel}</div>
-          <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
-          <p className="login-subtitle">Une course est déjà en préparation ou en cours sur ce poste.</p>
-        </div>
-      )}
-
-      {isArmed && ownsStation && (
-        <div className="results-action-card">
-          <div className="results-big-name">{currentCompetitor.participantLabel}</div>
-          <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
-          <div className="results-status-line">Start ID: <span className="admin-uid">{currentCompetitor.startId}</span></div>
-          <div className="results-status-line">Départs en mémoire: {startBuffer.length}</div>
-          <div className="results-action-grid">
-            {hasBufferedStart && (
+        >
+          <div className="results-course-setup-card">
+            <label className="form-label" htmlFor="course-name">Nom de la course</label>
+            <input
+              id="course-name"
+              className="form-input"
+              placeholder="Ex : Course 1"
+              value={courseDraft}
+              onChange={(e) => setCourseDraft(e.target.value)}
+              autoFocus
+            />
+            <div className="form-actions">
               <button
-                className="btn btn-secondary results-big-button"
-                disabled={busyAction === 'sync'}
+                className="btn btn-primary"
+                disabled={!courseDraft.trim() || busyAction === 'course'}
                 onClick={async () => {
-                  log.info('syncing local start buffer', {
-                    runId: currentCompetitor.runId,
-                    clickCount: startBuffer.length,
-                    actorUid: actor.uid,
-                  });
-                  setBusyAction('sync');
+                  const label = courseDraft.trim();
+                  const nextCourse = {
+                    courseId: createCourseId(label),
+                    courseLabel: label,
+                  };
+                  setBusyAction('course');
                   setActionError('');
                   try {
-                    await syncStartBuffer({ currentCompetitor, clicks: startBuffer, actor });
-                    clearStartBuffer(currentCompetitor.runId);
-                    setStartBuffer([]);
+                    await setStartStationCourse({
+                      uid: actor.uid,
+                      courseId: nextCourse.courseId,
+                      courseLabel: nextCourse.courseLabel,
+                    });
+                    setCurrentCourse(nextCourse);
                   } catch (error) {
-                    log.error('sync start buffer failed', error);
-                    await onActionError(error, 'start');
+                    log.error('setting start station course failed', error);
+                    onActionError(error, 'start');
                   } finally {
                     setBusyAction('');
                   }
                 }}
               >
-                {busyAction === 'sync' ? 'Synchronisation…' : 'Suivant'}
+                {busyAction === 'course' ? 'Validation…' : 'Valider la course'}
               </button>
+            </div>
+            {recentCourses.length > 0 && (
+              <div className="results-course-history">
+                <div className="results-course-history-title">Courses disponibles</div>
+                <div className="results-course-history-list">
+                  {recentCourses.map((course) => (
+                    <button
+                      key={course.courseId}
+                      type="button"
+                      className="results-course-history-item"
+                      disabled={busyAction === 'course'}
+                      onClick={async () => {
+                        setBusyAction('course');
+                        setActionError('');
+                        try {
+                          await setStartStationCourse({
+                            uid: actor.uid,
+                            courseId: course.courseId,
+                            courseLabel: course.courseLabel,
+                          });
+                          setCurrentCourse({
+                            courseId: course.courseId,
+                            courseLabel: course.courseLabel,
+                          });
+                          setCourseDraft(course.courseLabel);
+                        } catch (error) {
+                          log.error('selecting existing course failed', error);
+                          onActionError(error, 'start');
+                        } finally {
+                          setBusyAction('');
+                        }
+                      }}
+                    >
+                      <span>{course.courseLabel}</span>
+                      {course.lastActivityMs === Number.MAX_SAFE_INTEGER && (
+                        <span className="results-course-history-badge">En cours</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
-            {!hasBufferedStart && (
-              <button className="btn btn-primary results-big-button" onClick={appendStartClick}>
-                Départ
+          </div>
+        </StationSelectionScreen>
+      </ResultsShell>
+    );
+  }
+
+  const handleChangeCourse = () => {
+    if (!canChangeCourse) return;
+    setBusyAction('change-course');
+    setActionError('');
+    setStartStationCourse({
+      uid: actor.uid,
+      courseId: null,
+      courseLabel: '',
+    })
+      .then(() => {
+        setCurrentCourse(null);
+        setCourseDraft('');
+      })
+      .catch((error) => {
+        log.error('clearing start station course failed', error);
+        onActionError(error, 'start');
+      })
+      .finally(() => {
+        setBusyAction('');
+      });
+  };
+
+  if (!currentCompetitor && ownsStation) {
+    return (
+      <ResultsShell noHeader variant="operator">
+        <StationSelectionScreen
+          title="Poste départ"
+          courseLabel={currentCourse?.courseLabel || '—'}
+          email={actor.email || 'poste anonyme'}
+          actionError={actionError}
+          footerActions={(
+            <>
+              <button className="btn btn-secondary btn-sm" onClick={onReleaseStation}>
+                Libérer poste
               </button>
-            )}
+              <button className="btn btn-secondary btn-sm" onClick={handleChangeCourse} disabled={!canChangeCourse || busyAction === 'change-course'}>
+                Changer course
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={onOpenResultsBrowser}>
+                Résultats
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={onLogout}>
+                Déconnexion
+              </button>
+            </>
+          )}
+        >
+          <div className="results-participant-selection-card">
+            <div className="results-participant-list results-participant-list--selection">
+              {participants.length === 0 && <div className="stream-empty">Aucun participant disponible.</div>}
+              {participants.map((participant) => (
+                <button
+                  key={participant.id}
+                  className="results-participant-button results-participant-button--compact"
+                  disabled={busyAction !== '' || !currentCourse || !ownsStation}
+                  onClick={async () => {
+                    log.info('arming competitor from start station', {
+                      participantId: participant.id,
+                      participantLabel: participant.label,
+                      actorUid: actor.uid,
+                      course: currentCourse,
+                    });
+                    setBusyAction(`arm:${participant.id}`);
+                    setActionError('');
+                    try {
+                      const seed = createClickEntry();
+                      const runId = seed.clickId;
+                      const startId = seed.clickId;
+                      await armCurrentCompetitor({
+                        participant,
+                        actor,
+                        runId,
+                        startId,
+                        courseId: currentCourse.courseId,
+                        courseLabel: currentCourse.courseLabel,
+                        selectedAtClientMs: Date.now(),
+                      });
+                      clearStartBuffer(runId);
+                      setStartBuffer([]);
+                    } catch (error) {
+                      log.error('arming competitor failed', error);
+                      await onActionError(error, 'start');
+                    } finally {
+                      setBusyAction('');
+                    }
+                  }}
+                >
+                  <span className="results-participant-button-label">
+                    {busyAction === `arm:${participant.id}` ? 'Préparation…' : participant.label}
+                  </span>
+                  <span className="results-participant-stats">
+                    <span className="results-participant-stat results-participant-stat--danger">
+                      Ab {participantAbandonCounts[participant.id] || 0}
+                    </span>
+                    <span className="results-participant-stat">
+                      Fin {participantCounts[participant.id] || 0}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </StationSelectionScreen>
+      </ResultsShell>
+    );
+  }
+
+  let actionZone = null;
+
+  if (!ownsStation && showUnavailableNotice) {
+    actionZone = (
+      <div className="results-status-card results-station-action-card">
+        <div className="results-big-name">Poste non disponible</div>
+        <p className="login-subtitle">Ce poste départ n’est plus affecté à votre session. Les actions sont bloquées tant que vous ne reprenez pas le poste.</p>
+      </div>
+    );
+  } else if (currentCompetitor && !ownsCurrent) {
+    actionZone = (
+      <div className="results-status-card results-station-action-card">
+        <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+        <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
+        <p className="login-subtitle">Une course est déjà en préparation ou en cours sur ce poste.</p>
+      </div>
+    );
+  } else if (isArmed && ownsStation) {
+    actionZone = (
+      <section className="results-action-card results-station-action-card">
+        <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+        <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
+        <div className="results-status-line">Start ID: <span className="admin-uid">{currentCompetitor.startId}</span></div>
+        <div className="results-status-line">Départs en mémoire: {startBuffer.length}</div>
+        <div className="results-action-grid">
+          {hasBufferedStart && (
             <button
-              className="btn btn-danger results-big-button"
-              disabled={busyAction === 'cancel'}
+              className="btn btn-secondary results-big-button"
+              disabled={busyAction === 'sync'}
               onClick={async () => {
-                log.info('cancelling current competitor from start station', {
+                log.info('syncing local start buffer', {
                   runId: currentCompetitor.runId,
+                  clickCount: startBuffer.length,
                   actorUid: actor.uid,
                 });
-                setBusyAction('cancel');
+                setBusyAction('sync');
                 setActionError('');
                 try {
-                  await cancelCurrentCompetitor(currentCompetitor.runId, actor.uid);
+                  await syncStartBuffer({ currentCompetitor, clicks: startBuffer, actor });
                   clearStartBuffer(currentCompetitor.runId);
                   setStartBuffer([]);
                 } catch (error) {
-                  log.error('cancel current competitor failed', error);
+                  log.error('sync start buffer failed', error);
                   await onActionError(error, 'start');
                 } finally {
                   setBusyAction('');
                 }
               }}
             >
-              {busyAction === 'cancel' ? 'Annulation…' : 'Annuler'}
+              {busyAction === 'sync' ? 'Synchronisation…' : 'Suivant'}
             </button>
-          </div>
+          )}
+          {!hasBufferedStart && (
+            <button className="btn btn-primary results-big-button" onClick={appendStartClick}>
+              Départ
+            </button>
+          )}
+          <button
+            className="btn btn-danger results-big-button"
+            disabled={busyAction === 'cancel'}
+            onClick={async () => {
+              log.info('cancelling current competitor from start station', {
+                runId: currentCompetitor.runId,
+                actorUid: actor.uid,
+              });
+              setBusyAction('cancel');
+              setActionError('');
+              try {
+                await cancelCurrentCompetitor(currentCompetitor.runId, actor.uid);
+                clearStartBuffer(currentCompetitor.runId);
+                setStartBuffer([]);
+              } catch (error) {
+                log.error('cancel current competitor failed', error);
+                await onActionError(error, 'start');
+              } finally {
+                setBusyAction('');
+              }
+            }}
+          >
+            {busyAction === 'cancel' ? 'Annulation…' : 'Annuler'}
+          </button>
         </div>
-      )}
+      </section>
+    );
+  } else if (isRunning) {
+    actionZone = (
+      <div className="results-status-card results-station-action-card">
+        <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+        <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
+        <p className="login-subtitle">
+          {ownsStation
+            ? 'Course en cours. En attente de l’arrivée.'
+            : 'Course en cours, mais ce poste n’est plus affecté à votre session.'}
+        </p>
+      </div>
+    );
+  }
 
-      {isRunning && (
-        <div className="results-status-card">
-          <div className="results-big-name">{currentCompetitor.participantLabel}</div>
-          <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
-          <p className="login-subtitle">
-            {ownsStation
-              ? 'Course en cours. En attente de l’arrivée.'
-              : 'Course en cours, mais ce poste n’est plus affecté à votre session.'}
-          </p>
-        </div>
-      )}
-    </ResultsShell>
-  );
-}
-
-function StartStationHeader({
-  email,
-  courseLabel,
-  emailPopoverOpen,
-  onToggleEmail,
-  onReleaseStation,
-  onChangeCourse,
-  onLogout,
-  canChangeCourse,
-}) {
   return (
-    <div className="results-station-header">
-      <div className="results-station-header-main">
-        <div className="results-station-header-title">Poste départ</div>
-        <button className="results-email-chip" onClick={onToggleEmail} type="button">
-          <span className="results-email-chip-text">{email}</span>
-        </button>
-        {emailPopoverOpen && (
-          <div className="results-email-popover" onClick={onToggleEmail}>
-            {email}
-          </div>
+    <ResultsShell noHeader variant="operator">
+      <StationOperatorScreen
+        title="Poste départ"
+        courseLabel={currentCourse?.courseLabel || currentCompetitor?.courseLabel || '—'}
+        email={actor.email || 'poste anonyme'}
+        actionError={actionError}
+        actionZone={actionZone}
+        footerActions={(
+          <>
+            <button className="btn btn-secondary btn-sm" onClick={onReleaseStation}>
+              Libérer poste
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={handleChangeCourse} disabled={!canChangeCourse || busyAction === 'change-course'}>
+              Changer course
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={onOpenResultsBrowser}>
+              Résultats
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={onLogout}>
+              Déconnexion
+            </button>
+          </>
         )}
-      </div>
-      <div className="results-station-course">{courseLabel}</div>
-      <div className="results-toolbar">
-        <button className="btn btn-secondary btn-sm" onClick={onReleaseStation}>
-          Libérer poste
-        </button>
-        <button className="btn btn-secondary btn-sm" onClick={onChangeCourse} disabled={!canChangeCourse}>
-          Changer de course
-        </button>
-        <button className="btn btn-secondary btn-sm" onClick={onLogout}>
-          Déconnexion
-        </button>
-      </div>
-    </div>
+      />
+    </ResultsShell>
   );
 }
 
 function FinishStationView({
   actor,
   ownsStation,
+  resultEvents,
   currentCompetitor,
   busyAction,
   setBusyAction,
   actionError,
   setActionError,
   onActionError,
+  onOpenResultsBrowser,
   onReleaseStation,
   onLogout,
   showUnavailableNotice,
 }) {
+  const finishedCourses = useMemo(() => deriveFinishedCourses(resultEvents), [resultEvents]);
+  const recentRuns = useMemo(() => deriveRunsFromEvents(resultEvents).slice(0, 3), [resultEvents]);
   const canFinishCurrent = currentCompetitor?.status === 'running'
     && Number.isFinite(currentCompetitor?.latestStartAtClientMs);
+  const activeCourse = useMemo(() => {
+    if (currentCompetitor?.courseId) {
+      return {
+        courseId: currentCompetitor.courseId,
+        courseLabel: currentCompetitor.courseLabel || currentCompetitor.courseId,
+      };
+    }
+    const latestCourse = finishedCourses[0];
+    return latestCourse
+      ? {
+          courseId: latestCourse.courseId,
+          courseLabel: latestCourse.courseLabel || latestCourse.courseId,
+        }
+      : null;
+  }, [currentCompetitor?.courseId, currentCompetitor?.courseLabel, finishedCourses]);
+
+  let actionZone = null;
+
+  if (!ownsStation && showUnavailableNotice) {
+    actionZone = (
+      <div className="results-status-card results-station-action-card">
+        <div className="results-big-name">Poste non disponible</div>
+        <p className="login-subtitle">Ce poste arrivée n’est plus affecté à votre session. Les actions sont bloquées tant que vous ne reprenez pas le poste.</p>
+      </div>
+    );
+  } else if (!currentCompetitor) {
+    actionZone = (
+      <div className="results-status-card results-station-action-card">
+        <div className="results-big-name">En attente</div>
+        <p className="login-subtitle">Aucun concurrent n’a encore été lancé depuis le départ.</p>
+      </div>
+    );
+  } else if (!ownsStation) {
+    actionZone = (
+      <div className="results-status-card results-station-action-card">
+        <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+        <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
+        <p className="login-subtitle">Le concurrent est en attente d’arrivée, mais ce poste n’est plus affecté à votre session.</p>
+      </div>
+    );
+  } else {
+    actionZone = (
+      <section className="results-action-card results-station-action-card">
+        <div className="results-big-name">{currentCompetitor.participantLabel}</div>
+        <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
+        <div className="results-status-line">Start ID: <span className="admin-uid">{currentCompetitor.startId}</span></div>
+        {!canFinishCurrent && (
+          <p className="login-subtitle">En attente de la synchronisation du départ par le poste départ.</p>
+        )}
+        {canFinishCurrent && (
+          <>
+            <p className="login-subtitle">Appuyez dès que le concurrent franchit l’arrivée.</p>
+            <div className="results-action-grid">
+              <button
+                className="btn btn-primary results-big-button results-big-button--success"
+                disabled={busyAction === 'finish' || busyAction === 'abandon'}
+                onClick={async () => {
+                  log.info('finish click triggered', {
+                    runId: currentCompetitor?.runId,
+                    actorUid: actor.uid,
+                  });
+                  setBusyAction('finish');
+                  setActionError('');
+                  try {
+                    await completeCurrentCompetitor({
+                      actor,
+                      click: createClickEntry(),
+                    });
+                  } catch (error) {
+                    log.error('finish click failed', error);
+                    await onActionError(error, 'finish');
+                  } finally {
+                    setBusyAction('');
+                  }
+                }}
+              >
+                {busyAction === 'finish' ? 'Envoi…' : 'Arrivé'}
+              </button>
+              <button
+                className="btn btn-danger results-big-button"
+                disabled={busyAction === 'finish' || busyAction === 'abandon'}
+                onClick={async () => {
+                  log.info('abandon click triggered', {
+                    runId: currentCompetitor?.runId,
+                    actorUid: actor.uid,
+                  });
+                  setBusyAction('abandon');
+                  setActionError('');
+                  try {
+                    await abandonCurrentCompetitor({
+                      actor,
+                      click: createClickEntry(),
+                    });
+                  } catch (error) {
+                    log.error('abandon click failed', error);
+                    await onActionError(error, 'finish');
+                  } finally {
+                    setBusyAction('');
+                  }
+                }}
+              >
+                {busyAction === 'abandon' ? 'Envoi…' : 'Abandonné'}
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+    );
+  }
 
   return (
-    <ResultsShell noHeader>
-      <InlineStationHeader title="Poste arrivée" email={actor.email || 'poste anonyme'} />
-      <StationToolbar onReleaseStation={onReleaseStation} onLogout={onLogout} />
-      {actionError && <div className="form-error">{actionError}</div>}
-
-      {!ownsStation && showUnavailableNotice && (
-        <div className="results-status-card">
-          <div className="results-big-name">Poste non disponible</div>
-          <p className="login-subtitle">Ce poste arrivée n’est plus affecté à votre session. Les actions sont bloquées tant que vous ne reprenez pas le poste.</p>
-        </div>
-      )}
-
-      {!currentCompetitor && (
-        <div className="results-status-card">
-          <div className="results-big-name">En attente</div>
-          <p className="login-subtitle">Aucun concurrent n’a encore été lancé depuis le départ.</p>
-        </div>
-      )}
-
-      {currentCompetitor && ownsStation && (
-        <div className="results-action-card">
-          <div className="results-big-name">{currentCompetitor.participantLabel}</div>
-          <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
-          <div className="results-status-line">Start ID: <span className="admin-uid">{currentCompetitor.startId}</span></div>
-          {!canFinishCurrent && (
-            <p className="login-subtitle">En attente de la synchronisation du départ par le poste départ.</p>
-          )}
-          {canFinishCurrent && (
-            <>
-              <p className="login-subtitle">Appuyez dès que le concurrent franchit l’arrivée.</p>
-              <div className="results-action-grid">
-                <button
-                  className="btn btn-primary results-big-button results-big-button--success"
-                  disabled={busyAction === 'finish' || busyAction === 'abandon'}
-                  onClick={async () => {
-                    log.info('finish click triggered', {
-                      runId: currentCompetitor?.runId,
-                      actorUid: actor.uid,
-                    });
-                    setBusyAction('finish');
-                    setActionError('');
-                    try {
-                      await completeCurrentCompetitor({
-                        actor,
-                        click: createClickEntry(),
-                      });
-                    } catch (error) {
-                      log.error('finish click failed', error);
-                      await onActionError(error, 'finish');
-                    } finally {
-                      setBusyAction('');
-                    }
-                  }}
-                >
-                  {busyAction === 'finish' ? 'Envoi…' : 'Arrivé'}
-                </button>
-                <button
-                  className="btn btn-danger results-big-button"
-                  disabled={busyAction === 'finish' || busyAction === 'abandon'}
-                  onClick={async () => {
-                    log.info('abandon click triggered', {
-                      runId: currentCompetitor?.runId,
-                      actorUid: actor.uid,
-                    });
-                    setBusyAction('abandon');
-                    setActionError('');
-                    try {
-                      await abandonCurrentCompetitor({
-                        actor,
-                        click: createClickEntry(),
-                      });
-                    } catch (error) {
-                      log.error('abandon click failed', error);
-                      await onActionError(error, 'finish');
-                    } finally {
-                      setBusyAction('');
-                    }
-                  }}
-                >
-                  {busyAction === 'abandon' ? 'Envoi…' : 'Abandonné'}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {currentCompetitor && !ownsStation && (
-        <div className="results-status-card">
-          <div className="results-big-name">{currentCompetitor.participantLabel}</div>
-          <div className="results-status-line">Course: {currentCompetitor.courseLabel || currentCompetitor.courseId}</div>
-          <p className="login-subtitle">Le concurrent est en attente d’arrivée, mais ce poste n’est plus affecté à votre session.</p>
-        </div>
-      )}
+    <ResultsShell noHeader variant="operator">
+      <StationOperatorScreen
+        title="Poste arrivée"
+        courseLabel={activeCourse?.courseLabel || '—'}
+        email={actor.email || 'poste anonyme'}
+        actionError={actionError}
+        actionZone={actionZone}
+        footerActions={(
+          <>
+            <button className="btn btn-secondary btn-sm" onClick={onReleaseStation}>
+              Libérer poste
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={onOpenResultsBrowser}>
+              Résultats
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={onLogout}>
+              Déconnexion
+            </button>
+          </>
+        )}
+      >
+        <ResultsSummarySection
+          title="3 derniers résultats"
+          runs={recentRuns}
+          emptyLabel="Aucun résultat enregistré pour le moment."
+        />
+      </StationOperatorScreen>
     </ResultsShell>
   );
 }
 
-function InlineStationHeader({ title, email }) {
+function StationOperatorScreen({
+  title,
+  courseLabel,
+  email,
+  actionError,
+  actionZone,
+  footerActions,
+  children,
+}) {
+  return (
+    <div className="results-station-screen">
+      <StationScreenHeader title={title} courseLabel={courseLabel} email={email} />
+      {actionError && <div className="form-error">{actionError}</div>}
+      <div className="results-station-screen-fixed">
+        {actionZone}
+      </div>
+      <div className="results-station-screen-scroll">
+        <div className="results-station-results">
+          {children}
+        </div>
+      </div>
+      <div className="results-footer-toolbar">
+        {footerActions}
+      </div>
+    </div>
+  );
+}
+
+function StationSelectionScreen({
+  title,
+  courseLabel,
+  email,
+  actionError,
+  footerActions,
+  children,
+}) {
+  return (
+    <div className="results-station-screen results-station-screen--selection">
+      <StationScreenHeader title={title} courseLabel={courseLabel} email={email} />
+      {actionError && <div className="form-error">{actionError}</div>}
+      <div className="results-station-screen-scroll">
+        <div className="results-station-results">
+          {children}
+        </div>
+      </div>
+      {footerActions ? (
+        <div className="results-footer-toolbar">
+          {footerActions}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StationResultsBrowser({
+  actor,
+  station,
+  resultEvents,
+  browserView,
+  setBrowserView,
+  selectedCourseId,
+  setSelectedCourseId,
+  preferredCourseId,
+  preferredCourseLabel,
+}) {
+  const finishedCourses = useMemo(() => deriveFinishedCourses(resultEvents), [resultEvents]);
+  const competitionRuns = useMemo(() => deriveGeneralRanking(resultEvents), [resultEvents]);
+  const availableCourse = useMemo(() => {
+    if (!finishedCourses.length) return null;
+    if (selectedCourseId) {
+      return finishedCourses.find((course) => course.courseId === selectedCourseId) ?? null;
+    }
+    if (preferredCourseId) {
+      return finishedCourses.find((course) => course.courseId === preferredCourseId) ?? null;
+    }
+    return finishedCourses[0];
+  }, [finishedCourses, preferredCourseId, selectedCourseId]);
+
+  if (browserView === 'menu') {
+    return (
+      <ResultsShell noHeader variant="operator">
+        <StationSelectionScreen
+          title="Résultats"
+          courseLabel={station === 'start' ? 'poste départ' : 'poste arrivée'}
+          email={actor?.email || 'poste anonyme'}
+          footerActions={(
+            <button className="btn btn-secondary btn-sm" onClick={() => setBrowserView('station')}>
+              Retour au poste
+            </button>
+          )}
+        >
+          <div className="results-browser-menu">
+            <button className="results-browser-card" onClick={() => setBrowserView('competition')} type="button">
+              <div className="results-browser-card-title">Résultats de la compétition</div>
+              <div className="results-browser-card-subtitle">
+                Classement global de tous les temps enregistrés.
+              </div>
+            </button>
+
+            <section className="results-summary-card">
+              <div className="results-summary-card-title">Résultats d’une course</div>
+              {finishedCourses.length === 0 && (
+                <div className="results-summary-empty">Aucune course terminée pour le moment.</div>
+              )}
+              {finishedCourses.length > 0 && (
+                <div className="results-browser-course-list">
+                  {finishedCourses.map((course) => (
+                    <button
+                      key={course.courseId}
+                      type="button"
+                      className={`results-browser-course-item${availableCourse?.courseId === course.courseId ? ' results-browser-course-item--active' : ''}`}
+                      onClick={() => {
+                        setSelectedCourseId(course.courseId);
+                        setBrowserView('course');
+                      }}
+                    >
+                      {course.courseLabel}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        </StationSelectionScreen>
+      </ResultsShell>
+    );
+  }
+
+  if (browserView === 'course') {
+    return (
+      <ResultsShell noHeader variant="operator">
+        <StationSelectionScreen
+          title="Résultats course"
+          courseLabel={availableCourse?.courseLabel || preferredCourseLabel || ''}
+          email={actor?.email || 'poste anonyme'}
+          footerActions={(
+            <>
+              <button className="btn btn-secondary btn-sm" onClick={() => setBrowserView('menu')}>
+                Retour navigation
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setBrowserView('station')}>
+                Retour au poste
+              </button>
+            </>
+          )}
+        >
+          <ResultsSummarySection
+            title="Classement"
+            runs={availableCourse?.runs ?? []}
+            emptyLabel="Aucun résultat enregistré sur cette course."
+          />
+        </StationSelectionScreen>
+      </ResultsShell>
+    );
+  }
+
+  return (
+    <ResultsShell noHeader variant="operator">
+      <StationSelectionScreen
+        title="Résultats compétition"
+        email={actor?.email || 'poste anonyme'}
+        footerActions={(
+          <>
+            <button className="btn btn-secondary btn-sm" onClick={() => setBrowserView('menu')}>
+              Retour navigation
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setBrowserView('station')}>
+              Retour au poste
+            </button>
+          </>
+        )}
+      >
+        <ResultsSummarySection
+          title="Classement général"
+          runs={competitionRuns}
+          emptyLabel="Aucun résultat enregistré sur la compétition."
+        />
+      </StationSelectionScreen>
+    </ResultsShell>
+  );
+}
+
+function StationScreenHeader({ title, courseLabel, email }) {
   const [emailPopoverOpen, setEmailPopoverOpen] = useState(false);
 
   return (
-    <div className="results-inline-header">
-      <div className="results-inline-header-title">{title}</div>
-      <button className="results-email-chip" onClick={() => setEmailPopoverOpen((value) => !value)} type="button">
-        <span className="results-email-chip-text">({email})</span>
-      </button>
-      {emailPopoverOpen && (
-        <div className="results-email-popover" onClick={() => setEmailPopoverOpen(false)}>
-          {email}
+    <div className="results-station-screen-header">
+      <div className="results-station-screen-title-row">
+        <div className="results-station-screen-title">{title}</div>
+        {courseLabel ? (
+          <div className="results-station-screen-course" title={courseLabel}>
+            {courseLabel}
+          </div>
+        ) : null}
+      </div>
+      <div className="results-station-account-row">
+        <button className="results-email-chip" onClick={() => setEmailPopoverOpen((value) => !value)} type="button">
+          <span className="results-email-chip-text">({email})</span>
+        </button>
+        {emailPopoverOpen && (
+          <div className="results-email-popover results-email-popover--account" onClick={() => setEmailPopoverOpen(false)}>
+            {email}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ResultsSummarySection({ title, runs, emptyLabel }) {
+  return (
+    <section className="results-summary-card">
+      <div className="results-summary-card-title">{title}</div>
+      {runs.length === 0 && (
+        <div className="results-summary-empty">{emptyLabel}</div>
+      )}
+      {runs.length > 0 && (
+        <div className="results-summary-list">
+          {runs.map((run) => (
+            <article
+              key={`${title}:${run.runId}:${run.latestFinishClickId ?? run.latestAbandonClickId ?? run.latestStartClickId}`}
+              className={`results-summary-item${run.isAbandoned ? ' results-summary-item--danger' : ''}`}
+            >
+              <div className="results-summary-name" title={run.participantLabel}>
+                {run.participantLabel}
+              </div>
+              <div className={`results-summary-time${run.isAbandoned ? ' results-summary-time--danger' : ''}`}>
+                {run.isAbandoned ? 'Abandon' : run.durationLabel || formatResultTimestamp(run.lastEventAtClientMs)}
+              </div>
+            </article>
+          ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -1287,9 +1618,9 @@ function StationToolbar({ onReleaseStation, onLogout }) {
   );
 }
 
-function ResultsShell({ title, titleAside, subtitle, children, noHeader = false }) {
+function ResultsShell({ title, titleAside, subtitle, children, noHeader = false, variant = 'default' }) {
   return (
-    <div className="results-shell">
+    <div className={`results-shell results-shell--${variant}`}>
       <div className="results-shell-card">
         {!noHeader && (
           <div className="results-shell-head">
@@ -1480,6 +1811,15 @@ function formatClockTime(ms) {
 function formatDrift(driftMs) {
   const sign = driftMs > 0 ? '+' : driftMs < 0 ? '-' : '';
   return `${sign}${Math.abs(Math.round(driftMs))} ms`;
+}
+
+function formatResultTimestamp(ms) {
+  if (!Number.isFinite(ms)) return 'heure inconnue';
+  return new Date(ms).toLocaleTimeString('fr-FR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
 function slugifyCourse(value) {
