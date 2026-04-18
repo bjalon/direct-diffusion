@@ -829,6 +829,22 @@ function StartStationView({
     }, {}),
     [currentCourseSummary],
   );
+  const sortedSelectableParticipants = useMemo(
+    () => [...selectableParticipants].sort((a, b) => {
+      const participationDiff = (participantCounts[a.id] || 0) - (participantCounts[b.id] || 0);
+      if (participationDiff !== 0) {
+        return participationDiff;
+      }
+
+      const orderDiff = (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER);
+      if (orderDiff !== 0) {
+        return orderDiff;
+      }
+
+      return (a.label || '').localeCompare(b.label || '');
+    }),
+    [participantCounts, selectableParticipants],
+  );
   const recentCourses = useMemo(() => {
     const byCourse = new Map();
 
@@ -1033,8 +1049,8 @@ function StartStationView({
         >
           <div className="results-participant-selection-card">
             <div className="results-participant-list results-participant-list--selection">
-              {selectableParticipants.length === 0 && <div className="stream-empty">Aucun participant actif disponible.</div>}
-              {selectableParticipants.map((participant) => (
+              {sortedSelectableParticipants.length === 0 && <div className="stream-empty">Aucun participant actif disponible.</div>}
+              {sortedSelectableParticipants.map((participant) => (
                 <button
                   key={participant.id}
                   className="results-participant-button results-participant-button--compact"
