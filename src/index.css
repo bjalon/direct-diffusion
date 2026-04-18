@@ -1219,6 +1219,39 @@ html, body, #root {
   border-radius: var(--radius);
 }
 
+.participant-row-dragging {
+  border-color: rgba(24, 119, 242, 0.45);
+  box-shadow: 0 12px 28px rgba(24, 119, 242, 0.12);
+  opacity: 0.72;
+}
+
+.participant-drag-handle {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex-shrink: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: grab;
+}
+
+.participant-drag-handle:active {
+  cursor: grabbing;
+}
+
+.participant-drag-handle span {
+  width: 12px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 999px;
+}
+
 .participant-order-input {
   width: 60px;
   flex-shrink: 0;
@@ -1238,6 +1271,22 @@ html, body, #root {
   flex: 1;
   min-width: 0;
   font-size: 14px;
+}
+
+@media (max-width: 700px) {
+  .participant-row {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .participant-drag-handle {
+    width: 32px;
+    height: 32px;
+  }
+
+  .participant-order-input {
+    width: 54px;
+  }
 }
 
 /* ── Results page ── */

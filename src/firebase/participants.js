@@ -1,5 +1,5 @@
 import {
-  collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy,
+  collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { createLogger } from '../utils/logger';
@@ -29,3 +29,18 @@ export const updateParticipant = (id, data) =>
 
 export const deleteParticipant = (id) =>
   (log.info('deleteParticipant', { id }), deleteDoc(doc(db, 'participants', id)));
+
+export async function reorderParticipants(participantIds) {
+  if (!Array.isArray(participantIds) || participantIds.length === 0) {
+    return;
+  }
+
+  log.info('reorderParticipants', { count: participantIds.length });
+  const batch = writeBatch(db);
+
+  participantIds.forEach((participantId, index) => {
+    batch.update(doc(db, 'participants', participantId), { order: index + 1 });
+  });
+
+  await batch.commit();
+}
