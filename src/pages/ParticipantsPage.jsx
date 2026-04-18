@@ -180,9 +180,11 @@ function ParticipantRow({
 }) {
   const [label, setLabel] = useState(participant.label);
   const [order, setOrder] = useState(participant.order ?? 0);
+  const [active, setActive] = useState(participant.active !== false);
 
   useEffect(() => setLabel(participant.label), [participant.label]);
   useEffect(() => setOrder(participant.order ?? 0), [participant.order]);
+  useEffect(() => setActive(participant.active !== false), [participant.active]);
 
   const saveLabel = () => {
     if (!canEdit) return;
@@ -202,9 +204,20 @@ function ParticipantRow({
     }
   };
 
+  const toggleActive = async () => {
+    if (!canEdit || disableActions) return;
+    const nextActive = !active;
+    setActive(nextActive);
+    try {
+      await updateParticipant(participant.id, { active: nextActive });
+    } catch {
+      setActive(participant.active !== false);
+    }
+  };
+
   return (
     <div
-      className={`participant-row${isDragging ? ' participant-row-dragging' : ''}`}
+      className={`participant-row${isDragging ? ' participant-row-dragging' : ''}${active ? '' : ' participant-row-inactive'}`}
       onDragEnter={() => onDragEnter(participant.id)}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
@@ -242,6 +255,16 @@ function ParticipantRow({
         onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
         readOnly={!canEdit || disableActions}
       />
+      {canEdit && (
+        <button
+          className={`btn btn-sm ${active ? 'btn-secondary' : 'btn-primary'}`}
+          type="button"
+          onClick={toggleActive}
+          disabled={disableActions}
+        >
+          {active ? 'Désactiver' : 'Réactiver'}
+        </button>
+      )}
       {canEdit && (
         <button
           className="btn btn-danger btn-sm"

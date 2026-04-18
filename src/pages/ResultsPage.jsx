@@ -805,6 +805,10 @@ function StartStationView({
   const isRunning = currentCompetitor?.status === 'running';
   const hasBufferedStart = startBuffer.length > 0;
   const canChangeCourse = !currentCompetitor && ownsStation;
+  const selectableParticipants = useMemo(
+    () => participants.filter((participant) => participant.active !== false),
+    [participants],
+  );
   const finishedCourses = useMemo(() => deriveFinishedCourses(resultEvents), [resultEvents]);
   const currentCourseSummary = useMemo(
     () => (currentCourse ? finishedCourses.find((course) => course.courseId === currentCourse.courseId) : null),
@@ -1029,8 +1033,8 @@ function StartStationView({
         >
           <div className="results-participant-selection-card">
             <div className="results-participant-list results-participant-list--selection">
-              {participants.length === 0 && <div className="stream-empty">Aucun participant disponible.</div>}
-              {participants.map((participant) => (
+              {selectableParticipants.length === 0 && <div className="stream-empty">Aucun participant actif disponible.</div>}
+              {selectableParticipants.map((participant) => (
                 <button
                   key={participant.id}
                   className="results-participant-button results-participant-button--compact"

@@ -1225,6 +1225,11 @@ html, body, #root {
   opacity: 0.72;
 }
 
+.participant-row-inactive {
+  opacity: 0.68;
+  border-style: dashed;
+}
+
 .participant-drag-handle {
   width: 34px;
   height: 34px;

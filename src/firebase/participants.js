@@ -11,7 +11,14 @@ export function subscribeParticipants(onData) {
   return onSnapshot(
     query(COLL(), orderBy('order', 'asc')),
     (snap) => {
-      const participants = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const participants = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          active: data.active !== false,
+        };
+      });
       log.debug('participants snapshot', { count: participants.length });
       onData(participants);
     },
@@ -22,7 +29,7 @@ export function subscribeParticipants(onData) {
 }
 
 export const addParticipant = (label, order) =>
-  (log.info('addParticipant', { label, order }), addDoc(COLL(), { label, order }));
+  (log.info('addParticipant', { label, order }), addDoc(COLL(), { label, order, active: true }));
 
 export const updateParticipant = (id, data) =>
   (log.info('updateParticipant', { id, data }), updateDoc(doc(db, 'participants', id), data));
