@@ -465,6 +465,24 @@ export default function ResultsPage({ user, onLogout }) {
     setResultsBrowserCourseId('');
   }, [selectedStation]);
 
+  useEffect(() => {
+    if (selectedStation !== 'finish' || resultsBrowserView === 'station') return;
+    if (!Number.isFinite(currentCompetitor?.latestStartAtClientMs)) return;
+
+    log.info('returning finish station from results browser after start click', {
+      browserView: resultsBrowserView,
+      runId: currentCompetitor?.runId,
+      startId: currentCompetitor?.startId,
+    });
+    setResultsBrowserView('station');
+  }, [
+    selectedStation,
+    resultsBrowserView,
+    currentCompetitor?.latestStartAtClientMs,
+    currentCompetitor?.runId,
+    currentCompetitor?.startId,
+  ]);
+
   const handleClaimStation = async (station) => {
     if (!actor || !hasResultAccess) return;
     log.info('claiming station from results page', { station, actor });
@@ -1343,7 +1361,7 @@ function FinishStationView({
             <button className="btn btn-secondary btn-sm" onClick={onReleaseStation}>
               Libérer poste
             </button>
-            <button className="btn btn-secondary btn-sm" onClick={onOpenResultsBrowser}>
+            <button className="btn btn-secondary btn-sm" onClick={onOpenResultsBrowser} disabled={hasLocalStart}>
               Résultats
             </button>
             <button className="btn btn-secondary btn-sm" onClick={onLogout}>
