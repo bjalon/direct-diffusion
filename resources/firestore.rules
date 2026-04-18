@@ -94,8 +94,7 @@ service cloud.firestore {
 
     function canReadCurrentStation(docId) {
       return isAdministration()
-             || currentStationOwnedByRequester(docId)
-             || (currentStationMatchesRole(docId) && !currentStationExists(docId));
+             || currentStationMatchesRole(docId);
     }
 
     function currentStationMatchesRole(docId) {

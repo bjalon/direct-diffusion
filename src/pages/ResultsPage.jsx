@@ -69,6 +69,49 @@ export default function ResultsPage({ user, onLogout }) {
   const [hadSelectedStationOwnership, setHadSelectedStationOwnership] = useState(false);
   const [expectedStationRelease, setExpectedStationRelease] = useState('');
 
+  const clearSelectedStationState = (nextStationError = '') => {
+    setSelectedStation('');
+    setSelectedStationAssignment(null);
+    setPendingStationSelection('');
+    setStationState('idle');
+    setHadSelectedStationOwnership(false);
+    if (nextStationError) {
+      setStationError(nextStationError);
+    }
+  };
+
+  const resolveStationActionError = async (error, station) => {
+    if (error?.message !== 'station-not-owned' && error?.message !== 'station-not-claimed') {
+      setActionError(getErrorLabel(error));
+      return false;
+    }
+
+    try {
+      const assignment = await readCurrentStationAssignment(station);
+      if (!assignment || assignment.assignedUid !== actor?.uid) {
+        log.info('redirecting to station choice after station loss', {
+          station,
+          actorUid: actor?.uid,
+          assignment,
+          reason: error?.message,
+        });
+        setActionError('');
+        setDepossessionNotice('');
+        clearSelectedStationState(`Le poste ${stationLabel(station)} n’est plus réservé pour votre session.`);
+        return true;
+      }
+    } catch (readError) {
+      log.warn('failed to verify current station after action error', {
+        station,
+        actorUid: actor?.uid,
+        error: readError,
+      });
+    }
+
+    setActionError(getErrorLabel(error));
+    return false;
+  };
+
   useEffect(() => {
     if (user !== false || signInState === 'signing-in') return;
     log.info('starting anonymous sign-in for results page');
@@ -434,14 +477,6 @@ export default function ResultsPage({ user, onLogout }) {
     }
   };
 
-  const clearSelectedStationState = () => {
-    setSelectedStation('');
-    setSelectedStationAssignment(null);
-    setPendingStationSelection('');
-    setStationState('idle');
-    setHadSelectedStationOwnership(false);
-  };
-
   const handleReleaseSelectedStation = async () => {
     if (!selectedStation || !actor?.uid) return;
     setExpectedStationRelease(selectedStation);
@@ -451,7 +486,7 @@ export default function ResultsPage({ user, onLogout }) {
       clearSelectedStationState();
     } catch (error) {
       log.error('station release failed', { station: selectedStation, actorUid: actor.uid, error });
-      setActionError(getErrorLabel(error));
+      await resolveStationActionError(error, selectedStation);
     } finally {
       setExpectedStationRelease('');
     }
@@ -650,6 +685,7 @@ export default function ResultsPage({ user, onLogout }) {
           setCourseDraft={setCourseDraft}
           currentCourse={currentCourse}
           setCurrentCourse={setCurrentCourse}
+          onActionError={resolveStationActionError}
           onReleaseStation={handleReleaseSelectedStation}
           onLogout={handleResultsLogout}
           showUnavailableNotice={!depossessionNotice}
@@ -669,6 +705,7 @@ export default function ResultsPage({ user, onLogout }) {
         setBusyAction={setBusyAction}
         actionError={actionError}
         setActionError={setActionError}
+        onActionError={resolveStationActionError}
         onReleaseStation={handleReleaseSelectedStation}
         onLogout={handleResultsLogout}
         showUnavailableNotice={!depossessionNotice}
@@ -694,6 +731,7 @@ function StartStationView({
   setCourseDraft,
   currentCourse,
   setCurrentCourse,
+  onActionError,
   onReleaseStation,
   onLogout,
   showUnavailableNotice,
@@ -766,7 +804,7 @@ function StartStationView({
       await mirrorPendingStartClicks({ currentCompetitor, clicks: next, actor });
     } catch (error) {
       log.error('mirror pending start clicks failed', error);
-      setActionError(getErrorLabel(error));
+      await onActionError(error, 'start');
     }
   };
 
@@ -810,7 +848,7 @@ function StartStationView({
                   setCurrentCourse(nextCourse);
                 } catch (error) {
                   log.error('setting start station course failed', error);
-                  setActionError(getErrorLabel(error));
+                  onActionError(error, 'start');
                 } finally {
                   setBusyAction('');
                 }
@@ -845,7 +883,7 @@ function StartStationView({
                         setCourseDraft(course.courseLabel);
                       } catch (error) {
                         log.error('selecting existing course failed', error);
-                        setActionError(getErrorLabel(error));
+                        onActionError(error, 'start');
                       } finally {
                         setBusyAction('');
                       }
@@ -888,7 +926,7 @@ function StartStationView({
             })
             .catch((error) => {
               log.error('clearing start station course failed', error);
-              setActionError(getErrorLabel(error));
+              onActionError(error, 'start');
             })
             .finally(() => {
               setBusyAction('');
@@ -941,7 +979,7 @@ function StartStationView({
                   setStartBuffer([]);
                 } catch (error) {
                   log.error('arming competitor failed', error);
-                  setActionError(getErrorLabel(error));
+                  await onActionError(error, 'start');
                 } finally {
                   setBusyAction('');
                 }
@@ -996,7 +1034,7 @@ function StartStationView({
                     setStartBuffer([]);
                   } catch (error) {
                     log.error('sync start buffer failed', error);
-                    setActionError(getErrorLabel(error));
+                    await onActionError(error, 'start');
                   } finally {
                     setBusyAction('');
                   }
@@ -1026,7 +1064,7 @@ function StartStationView({
                   setStartBuffer([]);
                 } catch (error) {
                   log.error('cancel current competitor failed', error);
-                  setActionError(getErrorLabel(error));
+                  await onActionError(error, 'start');
                 } finally {
                   setBusyAction('');
                 }
@@ -1100,6 +1138,7 @@ function FinishStationView({
   setBusyAction,
   actionError,
   setActionError,
+  onActionError,
   onReleaseStation,
   onLogout,
   showUnavailableNotice,
@@ -1156,7 +1195,7 @@ function FinishStationView({
                       });
                     } catch (error) {
                       log.error('finish click failed', error);
-                      setActionError(getErrorLabel(error));
+                      await onActionError(error, 'finish');
                     } finally {
                       setBusyAction('');
                     }
@@ -1181,7 +1220,7 @@ function FinishStationView({
                       });
                     } catch (error) {
                       log.error('abandon click failed', error);
-                      setActionError(getErrorLabel(error));
+                      await onActionError(error, 'finish');
                     } finally {
                       setBusyAction('');
                     }
