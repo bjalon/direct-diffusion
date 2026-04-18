@@ -7,7 +7,7 @@ import { getUserRoles, saveStreams, seedStreamsIfEmpty, subscribeStreams } from 
 import NavBar from './components/NavBar';
 import { buildSrcFromUrl, normalizeFacebookEmbedSrc } from './utils/iframeParser';
 import { createLogger } from './utils/logger';
-import { loadConfig, saveConfig } from './utils/storage';
+import { loadConfig, normalizeConfigState, saveConfig } from './utils/storage';
 import AdminPage from './pages/AdminPage';
 import ConfigPage from './pages/ConfigPage';
 import DisplayPage from './pages/DisplayPage';
@@ -200,12 +200,14 @@ export default function App() {
     const prevFull = { ...layoutSlots, streams };
     const next = typeof updater === 'function' ? updater(prevFull) : updater;
     const { streams: nextStreams, ...nextLayoutSlots } = next;
+    const normalizedLayoutState = normalizeConfigState(nextLayoutSlots);
 
-    setLayoutSlots(nextLayoutSlots);
-    saveConfig(nextLayoutSlots);
+    setLayoutSlots(normalizedLayoutState);
+    saveConfig(normalizedLayoutState);
     log.info('layout config updated', {
-      layout: nextLayoutSlots.layout,
-      slots: nextLayoutSlots.slots,
+      configurationId: normalizedLayoutState.activeConfigurationId,
+      layout: normalizedLayoutState.layout,
+      slots: normalizedLayoutState.slots,
       streamCount: nextStreams?.length,
     });
 
@@ -264,7 +266,19 @@ function AppShell({
 
   return (
     <div className="app-root">
-      {showNavbar && <NavBar user={user} onLogout={handleLogout} roles={permissions} identityLabel={permissions?.identityLabel} />}
+      {showNavbar && (
+        <NavBar
+          user={user}
+          onLogout={handleLogout}
+          roles={permissions}
+          identityLabel={permissions?.identityLabel}
+          config={config}
+          onSelectConfiguration={(configurationId) => updateConfig((prev) => ({
+            ...prev,
+            activeConfigurationId: configurationId,
+          }))}
+        />
+      )}
       <main className="app-main">
         <Routes>
           <Route

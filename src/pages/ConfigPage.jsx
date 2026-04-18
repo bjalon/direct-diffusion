@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  generateId,
   getLayouts,
   loadCustomLayouts,
 } from '../utils/storage';
@@ -51,6 +52,26 @@ function NumberSetting({ label, value, onChange, min, max, step, suffix }) {
   );
 }
 
+function countAssignedSlots(slots) {
+  return Object.values(slots ?? {}).filter(Boolean).length;
+}
+
+function buildConfigurationCopyName(existingConfigurations, sourceName) {
+  const baseName = sourceName?.trim() || 'Configuration';
+  const existingNames = new Set(Object.values(existingConfigurations ?? {}).map((configuration) => configuration.name));
+
+  if (!existingNames.has(`${baseName} copie`)) {
+    return `${baseName} copie`;
+  }
+
+  let index = 2;
+  while (existingNames.has(`${baseName} copie ${index}`)) {
+    index += 1;
+  }
+
+  return `${baseName} copie ${index}`;
+}
+
 export default function ConfigPage({ config, onUpdate }) {
   const [customLayouts] = useState(loadCustomLayouts);
 
@@ -59,37 +80,176 @@ export default function ConfigPage({ config, onUpdate }) {
   const { cols, slots: slotCount } = layout;
   const videoStreams = config.streams.filter((stream) => !stream.type);
   const availableStreams = [{ ...BUILTIN_VIRTUAL_STREAM, delay: config.virtualDisplayDelay ?? 10 }, ...videoStreams];
+  const configurations = config.configurations ?? {};
+  const configurationEntries = Object.entries(configurations);
+  const activeConfigurationId = config.activeConfigurationId ?? configurationEntries[0]?.[0] ?? 'default';
+
+  const updateActiveConfiguration = (updater) => {
+    onUpdate((prev) => {
+      const currentConfiguration = prev.configurations?.[prev.activeConfigurationId];
+      if (!currentConfiguration) {
+        return prev;
+      }
+
+      const nextConfiguration = typeof updater === 'function'
+        ? updater(currentConfiguration)
+        : { ...currentConfiguration, ...updater };
+
+      return {
+        ...prev,
+        configurations: {
+          ...prev.configurations,
+          [prev.activeConfigurationId]: nextConfiguration,
+        },
+      };
+    });
+  };
 
   const handleLayoutChange = (newLayout) => {
-    onUpdate((prev) => ({ ...prev, layout: newLayout }));
+    updateActiveConfiguration((currentConfiguration) => ({
+      ...currentConfiguration,
+      layout: newLayout,
+    }));
   };
 
   const handleSlotAssign = (slotIndex, streamId) => {
-    onUpdate((prev) => ({
-      ...prev,
-      slots: { ...prev.slots, [slotIndex]: streamId || null },
+    updateActiveConfiguration((currentConfiguration) => ({
+      ...currentConfiguration,
+      slots: { ...(currentConfiguration.slots ?? {}), [slotIndex]: streamId || null },
     }));
   };
 
   const handleDelayChange = (newDelay) => {
-    onUpdate((prev) => ({
-      ...prev,
+    updateActiveConfiguration((currentConfiguration) => ({
+      ...currentConfiguration,
       virtualDisplayDelay: newDelay,
     }));
   };
 
   const handleVirtualSettingChange = (key, nextValue, fallback, min) => {
     const safeValue = Number.isFinite(nextValue) ? nextValue : fallback;
-    onUpdate((prev) => ({
-      ...prev,
+    updateActiveConfiguration((currentConfiguration) => ({
+      ...currentConfiguration,
       [key]: Math.max(min, safeValue),
     }));
+  };
+
+  const handleConfigurationRename = (configurationId, name) => {
+    onUpdate((prev) => ({
+      ...prev,
+      configurations: {
+        ...prev.configurations,
+        [configurationId]: {
+          ...prev.configurations[configurationId],
+          name,
+        },
+      },
+    }));
+  };
+
+  const handleConfigurationDuplicate = () => {
+    onUpdate((prev) => {
+      const nextId = `display-config-${generateId()}`;
+      const activeConfiguration = prev.configurations?.[prev.activeConfigurationId];
+      if (!activeConfiguration) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        activeConfigurationId: nextId,
+        configurations: {
+          ...prev.configurations,
+          [nextId]: {
+            ...activeConfiguration,
+            id: nextId,
+            name: buildConfigurationCopyName(prev.configurations, activeConfiguration.name),
+            slots: { ...(activeConfiguration.slots ?? {}) },
+          },
+        },
+      };
+    });
+  };
+
+  const handleConfigurationDelete = (configurationId) => {
+    onUpdate((prev) => {
+      const nextConfigurations = { ...prev.configurations };
+      delete nextConfigurations[configurationId];
+
+      const nextConfigurationIds = Object.keys(nextConfigurations);
+      if (nextConfigurationIds.length === 0) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        activeConfigurationId: prev.activeConfigurationId === configurationId
+          ? nextConfigurationIds[0]
+          : prev.activeConfigurationId,
+        configurations: nextConfigurations,
+      };
+    });
   };
 
   return (
     <div className="config-page">
       <section className="config-section">
+        <div className="config-presets-head">
+          <div>
+            <h2 className="section-title">Configurations</h2>
+            <p className="hint">
+              Préparez plusieurs dispositions complètes ici. La disposition effectivement affichée se choisit depuis le menu discret dans la barre du haut.
+            </p>
+          </div>
+          <button className="btn btn-primary btn-sm" type="button" onClick={handleConfigurationDuplicate}>
+            + Dupliquer la configuration active
+          </button>
+        </div>
+
+        <div className="config-presets-grid">
+          {configurationEntries.map(([configurationId, configuration]) => {
+            const configurationLayout = layouts[configuration.layout] ?? layouts['1'];
+            const isActive = configurationId === activeConfigurationId;
+
+            return (
+              <div key={configurationId} className={`config-preset-card${isActive ? ' active' : ''}`}>
+                <div className="config-preset-actions">
+                  <span className={`config-preset-status${isActive ? ' active' : ''}`}>
+                    {isActive ? 'Actuellement affichée' : 'Disponible'}
+                  </span>
+                  {configurationEntries.length > 1 && (
+                    <button
+                      className="btn btn-danger btn-sm"
+                      type="button"
+                      onClick={() => handleConfigurationDelete(configurationId)}
+                    >
+                      Supprimer
+                    </button>
+                  )}
+                </div>
+
+                <input
+                  className="form-input config-preset-name"
+                  value={configuration.name}
+                  onChange={(e) => handleConfigurationRename(configurationId, e.target.value)}
+                  placeholder="Nom de la configuration"
+                />
+
+                <div className="config-preset-meta">
+                  <span>{configurationLayout.label}</span>
+                  <span>{countAssignedSlots(configuration.slots)} / {configurationLayout.slots} flux assignés</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="config-section">
         <h2 className="section-title">Disposition</h2>
+        <p className="hint" style={{ paddingTop: 0 }}>
+          Édition de : <strong>{configurations[activeConfigurationId]?.name || 'Configuration'}</strong>
+        </p>
         <LayoutPicker selected={config.layout} onChange={handleLayoutChange} layouts={layouts} />
       </section>
 

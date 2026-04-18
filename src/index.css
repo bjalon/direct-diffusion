@@ -314,6 +314,87 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+.navbar-configuration {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.navbar-configuration-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.navbar-configuration-button:hover,
+.navbar-configuration-button.active {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border);
+}
+
+.navbar-configuration-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.navbar-configuration-caret {
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.navbar-configuration-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+  overflow: hidden;
+  z-index: 310;
+}
+
+.navbar-configuration-item,
+.navbar-dropdown-action {
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.navbar-configuration-item:hover,
+.navbar-dropdown-action:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.navbar-configuration-item.active,
+.navbar-dropdown-action.active {
+  background: rgba(24,119,242,0.12);
+  color: var(--accent);
+}
+
 .navbar-email {
   font-size: 12px;
   color: var(--muted);
@@ -386,6 +467,15 @@ html, body, #root {
   margin: 4px 0;
 }
 
+.navbar-dropdown-heading {
+  padding: 12px 18px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .navbar-dropdown-logout {
   padding: 12px 18px;
   background: transparent;
@@ -402,10 +492,13 @@ html, body, #root {
 
 @media (max-width: 600px) {
   .navbar-links        { display: none; }
+  .navbar-configuration { display: none; }
   .navbar-email        { display: none; }
   .navbar-logout       { display: none !important; }
   .navbar-burger       { display: flex; }
   .navbar-brand        { flex: 1; }
+  .config-presets-head { flex-direction: column; }
+  .config-preset-actions { flex-direction: column; align-items: flex-start; }
 }
 
 /* ── Display page ── */
@@ -531,6 +624,67 @@ html, body, #root {
 
 .config-section {
   margin-bottom: 44px;
+}
+
+.config-presets-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.config-presets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.config-preset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.config-preset-card.active {
+  border-color: rgba(24, 119, 242, 0.48);
+  box-shadow: 0 16px 30px rgba(24, 119, 242, 0.12);
+}
+
+.config-preset-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.config-preset-status {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.config-preset-status.active {
+  color: var(--accent);
+}
+
+.config-preset-name {
+  font-weight: 600;
+}
+
+.config-preset-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .section-title {

@@ -159,6 +159,8 @@ export const BUILTIN_LAYOUTS = {
 
 const STORAGE_KEY = 'direct-diffusion-config';
 const CUSTOM_LAYOUTS_KEY = 'direct-diffusion-custom-layouts';
+const DEFAULT_DISPLAY_CONFIGURATION_ID = 'default';
+const DEFAULT_DISPLAY_CONFIGURATION_NAME = 'Configuration 1';
 
 function normalizePlacement(raw) {
   return {
@@ -219,7 +221,7 @@ export function isCustomLayoutId(layoutId) {
   return !!layoutId && !BUILTIN_LAYOUTS[layoutId];
 }
 
-function buildEnvDefault() {
+function buildEnvDefaultPreset() {
   const layout = import.meta.env.VITE_DEFAULT_LAYOUT || '1';
   const resolvedLayout = BUILTIN_LAYOUTS[layout] ? layout : '1';
   return {
@@ -232,42 +234,113 @@ function buildEnvDefault() {
   };
 }
 
+function normalizeSlots(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(raw).map(([key, value]) => [key, value || null]),
+  );
+}
+
+function normalizeDisplayConfiguration(raw, id = DEFAULT_DISPLAY_CONFIGURATION_ID, fallbackName = DEFAULT_DISPLAY_CONFIGURATION_NAME) {
+  const defaults = buildEnvDefaultPreset();
+
+  return {
+    id,
+    name: typeof raw?.name === 'string' && raw.name.trim() ? raw.name.trim() : fallbackName,
+    layout: typeof raw?.layout === 'string' && raw.layout ? raw.layout : defaults.layout,
+    slots: normalizeSlots(raw?.slots),
+    virtualDisplayDelay: Number.isFinite(raw?.virtualDisplayDelay) ? raw.virtualDisplayDelay : defaults.virtualDisplayDelay,
+    virtualDisplayStartPause: Number.isFinite(raw?.virtualDisplayStartPause) ? raw.virtualDisplayStartPause : defaults.virtualDisplayStartPause,
+    virtualDisplayScrollSpeed: Number.isFinite(raw?.virtualDisplayScrollSpeed) ? raw.virtualDisplayScrollSpeed : defaults.virtualDisplayScrollSpeed,
+    virtualDisplayEndPause: Number.isFinite(raw?.virtualDisplayEndPause) ? raw.virtualDisplayEndPause : defaults.virtualDisplayEndPause,
+  };
+}
+
+function expandConfigStore(configurations, activeConfigurationId) {
+  const configurationIds = Object.keys(configurations);
+  const resolvedActiveConfigurationId = configurations[activeConfigurationId]
+    ? activeConfigurationId
+    : configurationIds[0];
+  const activeConfiguration = configurations[resolvedActiveConfigurationId];
+
+  return {
+    activeConfigurationId: resolvedActiveConfigurationId,
+    configurations,
+    layout: activeConfiguration.layout,
+    slots: activeConfiguration.slots,
+    virtualDisplayDelay: activeConfiguration.virtualDisplayDelay,
+    virtualDisplayStartPause: activeConfiguration.virtualDisplayStartPause,
+    virtualDisplayScrollSpeed: activeConfiguration.virtualDisplayScrollSpeed,
+    virtualDisplayEndPause: activeConfiguration.virtualDisplayEndPause,
+  };
+}
+
+export function normalizeConfigState(raw) {
+  if (raw?.configurations && typeof raw.configurations === 'object') {
+    const normalizedConfigurations = Object.fromEntries(
+      Object.entries(raw.configurations)
+        .map(([id, value], index) => [
+          id,
+          normalizeDisplayConfiguration(value, id, `Configuration ${index + 1}`),
+        ])
+        .filter(([, value]) => !!value),
+    );
+
+    if (Object.keys(normalizedConfigurations).length > 0) {
+      return expandConfigStore(
+        normalizedConfigurations,
+        typeof raw.activeConfigurationId === 'string' ? raw.activeConfigurationId : DEFAULT_DISPLAY_CONFIGURATION_ID,
+      );
+    }
+  }
+
+  const defaultConfiguration = normalizeDisplayConfiguration(
+    raw,
+    DEFAULT_DISPLAY_CONFIGURATION_ID,
+    DEFAULT_DISPLAY_CONFIGURATION_NAME,
+  );
+
+  return expandConfigStore(
+    { [DEFAULT_DISPLAY_CONFIGURATION_ID]: defaultConfiguration },
+    DEFAULT_DISPLAY_CONFIGURATION_ID,
+  );
+}
+
 export function loadConfig() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return buildEnvDefault();
-    const saved = JSON.parse(raw);
-    return {
-      layout: '1',
-      slots: {},
-      virtualDisplayDelay: 10,
-      virtualDisplayStartPause: 4,
-      virtualDisplayScrollSpeed: 28,
-      virtualDisplayEndPause: 4,
-      ...saved,
-    };
+    if (!raw) return normalizeConfigState(null);
+    return normalizeConfigState(JSON.parse(raw));
   } catch {
-    return buildEnvDefault();
+    return normalizeConfigState(null);
   }
 }
 
-export function saveConfig({
-  layout,
-  slots,
-  virtualDisplayDelay,
-  virtualDisplayStartPause,
-  virtualDisplayScrollSpeed,
-  virtualDisplayEndPause,
-}) {
+export function saveConfig(config) {
+  const normalizedConfig = normalizeConfigState(config);
+  const persistedConfigurations = Object.fromEntries(
+    Object.entries(normalizedConfig.configurations).map(([id, value]) => [
+      id,
+      {
+        name: value.name,
+        layout: value.layout,
+        slots: value.slots,
+        virtualDisplayDelay: value.virtualDisplayDelay,
+        virtualDisplayStartPause: value.virtualDisplayStartPause,
+        virtualDisplayScrollSpeed: value.virtualDisplayScrollSpeed,
+        virtualDisplayEndPause: value.virtualDisplayEndPause,
+      },
+    ]),
+  );
+
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
-      layout,
-      slots,
-      virtualDisplayDelay,
-      virtualDisplayStartPause,
-      virtualDisplayScrollSpeed,
-      virtualDisplayEndPause,
+      activeConfigurationId: normalizedConfig.activeConfigurationId,
+      configurations: persistedConfigurations,
     }),
   );
 }
