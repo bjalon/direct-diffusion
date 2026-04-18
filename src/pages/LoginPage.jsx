@@ -6,6 +6,7 @@ import { auth } from '../firebase';
 import { submitResultAccessRequest } from '../firebase/results';
 import { createLogger } from '../utils/logger';
 import { forgetAnonymousAccount, listAnonymousAccounts, restoreAnonymousAccount } from '../utils/anonymousAccounts';
+import { ROUTES } from '../utils/routes';
 
 const googleProvider = new GoogleAuthProvider();
 const log = createLogger('LoginPage');
@@ -133,7 +134,7 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
           <div className="results-status-card">
             <div className="results-status-line"><strong>Email:</strong> {deviceAccess.email || '—'}</div>
             <div className="results-status-line"><strong>UID:</strong> {user.uid}</div>
-            <button className="btn btn-primary login-btn" onClick={() => navigate('/')}>
+            <button className="btn btn-primary login-btn" onClick={() => navigate(ROUTES.display)}>
               Aller sur Affichage
             </button>
           </div>

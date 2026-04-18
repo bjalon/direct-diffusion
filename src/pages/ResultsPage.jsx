@@ -33,6 +33,7 @@ import {
 import { createLogger } from '../utils/logger';
 import { forgetAnonymousAccount, listAnonymousAccounts, restoreAnonymousAccount } from '../utils/anonymousAccounts';
 import { deriveFinishedCourses, deriveGeneralRanking, deriveRunsFromEvents } from '../utils/resultsDerivation';
+import { ROUTES } from '../utils/routes';
 
 const log = createLogger('ResultsPage');
 const RESUME_EVENT_DEBOUNCE_MS = 750;
@@ -637,7 +638,7 @@ export default function ResultsPage({ user, onLogout }) {
           onLogout={handleResultsLogout}
           actions={(
             <>
-              <button className="btn btn-primary login-btn" onClick={() => navigate('/')}>
+              <button className="btn btn-primary login-btn" onClick={() => navigate(ROUTES.display)}>
                 Aller sur Affichage
               </button>
               <button className="btn btn-secondary login-btn" onClick={handleResultsLogout}>

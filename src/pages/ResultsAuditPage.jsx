@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { subscribeResultEvents, toggleResultEventActive } from '../firebase/results';
 import { formatEventTimestamp, sortEventsNewestFirst } from '../utils/resultsDerivation';
+import { ROUTES } from '../utils/routes';
 
 export default function ResultsAuditPage() {
   const [events, setEvents] = useState([]);
@@ -36,7 +37,7 @@ export default function ResultsAuditPage() {
         <div className="admin-section-head">
           <h2 className="section-title">Journal Résultats</h2>
           <div className="admin-actions">
-            <Link className="btn btn-secondary btn-sm" to="/results-runs">
+            <Link className="btn btn-secondary btn-sm" to={ROUTES.runs}>
               Corriger un run
             </Link>
           </div>

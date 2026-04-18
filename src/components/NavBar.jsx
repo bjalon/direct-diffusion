@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { ROUTES } from '../utils/routes';
 
 const ALL_LINKS = [
-  { to: '/',             label: 'Affichage',    role: null },
-  { to: '/results-view', label: 'Résultats',    role: 'results_view' },
-  { to: '/config',       label: 'Flux',         role: null },
-  { to: '/streams-admin', label: 'Flux admin',  role: 'streams_admin' },
-  { to: '/layouts',      label: 'Layouts',      role: null },
-  { to: '/participants', label: 'Participants', role: 'participants' },
-  { to: '/results-runs', label: 'Runs',         role: 'administration' },
-  { to: '/admin',        label: 'Admin',        role: 'administration' },
-  { to: '/results-archives', label: 'Archives', role: 'administration' },
+  { to: ROUTES.display,      label: 'Affichage',   role: null },
+  { to: ROUTES.results,      label: 'Résultats',   role: 'results_view' },
+  { to: ROUTES.flow,         label: 'Flow',        role: null },
+  { to: ROUTES.flowAdmin,    label: 'Flow admin',  role: 'streams_admin' },
+  { to: ROUTES.layouts,      label: 'Layouts',     role: null },
+  { to: ROUTES.participants, label: 'Participants', role: 'participants' },
+  { to: ROUTES.runs,         label: 'Runs',        role: 'administration' },
+  { to: ROUTES.admin,        label: 'Admin',       role: 'administration' },
+  { to: ROUTES.archives,     label: 'Archives',    role: 'administration' },
 ];
 
 export default function NavBar({ user, onLogout, roles, identityLabel, config, onSelectConfiguration }) {

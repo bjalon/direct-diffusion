@@ -9,6 +9,7 @@ import { buildSrcFromUrl, normalizeFacebookEmbedSrc } from './utils/iframeParser
 import { createLogger } from './utils/logger';
 import { rememberAnonymousAccount } from './utils/anonymousAccounts';
 import { loadConfig, normalizeConfigState, saveConfig } from './utils/storage';
+import { LEGACY_ROUTE_REDIRECTS, ROUTES } from './utils/routes';
 import AdminPage from './pages/AdminPage';
 import ConfigPage from './pages/ConfigPage';
 import DisplayPage from './pages/DisplayPage';
@@ -295,10 +296,10 @@ function AppShell({
     await signOut(auth);
   };
   const hasLightResultsAccess = !!(user?.isAnonymous && (deviceAccess?.results_start || deviceAccess?.results_finish));
-  const showNavbar = pathname !== '/results' && !!user && user !== false && !!permissions;
+  const showNavbar = pathname !== ROUTES.chrono && !!user && user !== false && !!permissions;
 
-  if (hasLightResultsAccess && pathname !== '/results') {
-    return <Navigate to="/results" replace />;
+  if (hasLightResultsAccess && pathname !== ROUTES.chrono) {
+    return <Navigate to={ROUTES.chrono} replace />;
   }
 
   return (
@@ -318,8 +319,11 @@ function AppShell({
       )}
       <main className="app-main">
         <Routes>
+          {LEGACY_ROUTE_REDIRECTS.map(({ from, to }) => (
+            <Route key={from} path={from} element={<Navigate to={to} replace />} />
+          ))}
           <Route
-            path="/"
+            path={ROUTES.display}
             element={(
               <RegularRoute
                 user={user}
@@ -335,7 +339,7 @@ function AppShell({
             )}
           />
           <Route
-            path="/config"
+            path={ROUTES.flow}
             element={(
               <RegularRoute
                 user={user}
@@ -351,7 +355,7 @@ function AppShell({
             )}
           />
           <Route
-            path="/streams-admin"
+            path={ROUTES.flowAdmin}
             element={(
               <RegularRoute
                 user={user}
@@ -368,7 +372,7 @@ function AppShell({
             )}
           />
           <Route
-            path="/participants"
+            path={ROUTES.participants}
             element={(
               <RegularRoute
                 user={user}
@@ -385,7 +389,7 @@ function AppShell({
             )}
           />
           <Route
-            path="/layouts"
+            path={ROUTES.layouts}
             element={(
               <RegularRoute
                 user={user}
@@ -401,7 +405,7 @@ function AppShell({
             )}
           />
           <Route
-            path="/admin"
+            path={ROUTES.admin}
             element={(
               <RegularRoute
                 user={user}
@@ -418,7 +422,7 @@ function AppShell({
             )}
           />
           <Route
-            path="/results-view"
+            path={ROUTES.results}
             element={(
               <RegularRoute
                 user={user}
@@ -435,24 +439,7 @@ function AppShell({
             )}
           />
           <Route
-            path="/results-admin"
-            element={(
-              <RegularRoute
-                user={user}
-                permissions={permissions}
-                requiredRole="results_view"
-                accessRequestState={accessRequestState}
-                setAccessRequestState={setAccessRequestState}
-                onLogout={handleLogout}
-                deviceAccess={deviceAccess}
-                deviceRequest={deviceRequest}
-              >
-                <Navigate to="/results-view" replace />
-              </RegularRoute>
-            )}
-          />
-          <Route
-            path="/results-runs"
+            path={ROUTES.runs}
             element={(
               <RegularRoute
                 user={user}
@@ -469,7 +456,7 @@ function AppShell({
             )}
           />
           <Route
-            path="/results-archives"
+            path={ROUTES.archives}
             element={(
               <RegularRoute
                 user={user}
@@ -485,8 +472,8 @@ function AppShell({
               </RegularRoute>
             )}
           />
-          <Route path="/results" element={<ResultsPage user={user} onLogout={handleLogout} />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path={ROUTES.chrono} element={<ResultsPage user={user} onLogout={handleLogout} />} />
+          <Route path="*" element={<Navigate to={ROUTES.display} replace />} />
         </Routes>
       </main>
     </div>
@@ -545,7 +532,7 @@ function RegularRoute({
       requiredRole,
       permissions,
     });
-    return <Navigate to="/" replace />;
+    return <Navigate to={ROUTES.display} replace />;
   }
 
   return children;
