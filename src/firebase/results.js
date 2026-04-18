@@ -29,6 +29,11 @@ import { createSingleFileZip, readSingleFileZip } from '../utils/zipSingleFile';
 const RESULT_ACCESS = (uid) => doc(db, 'allowedResultUsers', uid);
 const RESULT_REQUEST = (uid) => doc(db, 'resultAccessRequests', uid);
 const RESULT_STATION = (station) => doc(db, 'resultStations', station);
+const CURRENT_STATION = (station) => doc(
+  db,
+  'currentStations',
+  station === 'start' ? 'currentStart' : 'currentFinish',
+);
 const CURRENT_COMPETITOR = doc(db, 'currentCompetitor', 'current');
 const RESULT_EVENT = (eventId) => doc(db, 'resultEvents', eventId);
 const RESULT_RUN = (runId) => doc(db, 'resultRuns', runId);
@@ -225,8 +230,32 @@ export function subscribeStation(station, onData) {
   });
 }
 
+export function subscribeCurrentStationAssignment(station, onData, onError) {
+  return onSnapshot(CURRENT_STATION(station), (snap) => {
+    const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+    log.debug('current station snapshot', { station, data });
+    onData(data);
+  }, (error) => {
+    log.error('current station subscription failed', { station, error });
+    onError?.(error);
+  });
+}
+
+export async function readCurrentStationAssignment(station) {
+  try {
+    const snap = await getDoc(CURRENT_STATION(station));
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  } catch (error) {
+    if (error?.code === 'permission-denied') {
+      log.debug('current station read denied', { station });
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function assertStationOwned(station, uid) {
-  const snap = await getDoc(RESULT_STATION(station));
+  const snap = await getDoc(CURRENT_STATION(station));
   if (!snap.exists()) {
     throw new Error('station-not-claimed');
   }
@@ -238,48 +267,39 @@ async function assertStationOwned(station, uid) {
 
 export async function claimStation(station, actor) {
   log.info('claimStation start', { station, actor });
-  await runTransaction(db, async (transaction) => {
-    const ref = RESULT_STATION(station);
-    const snap = await transaction.get(ref);
-    if (snap.exists()) {
-      const current = snap.data();
-      if (current.assignedUid && current.assignedUid !== actor.uid) {
-        throw new Error('station-occupied');
-      }
-    }
-
-    transaction.set(ref, {
+  try {
+    await setDoc(CURRENT_STATION(station), {
       station,
       assignedUid: actor.uid,
       assignedEmail: actor.email ?? '',
       assignedProviderId: actor.providerId ?? 'anonymous',
-      ...(station === 'start'
-        ? {
-            currentCourseId: null,
-            currentCourseLabel: '',
-          }
-        : {}),
       updatedAt: serverTimestamp(),
       assignedAt: serverTimestamp(),
     }, { merge: true });
-  });
+  } catch (error) {
+    if (error?.code === 'permission-denied') {
+      throw new Error('station-occupied');
+    }
+    throw error;
+  }
 }
 
 export async function setStartStationCourse({ uid, courseId, courseLabel }) {
   log.info('setStartStationCourse start', { uid, courseId, courseLabel });
   await runTransaction(db, async (transaction) => {
-    const ref = RESULT_STATION('start');
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) {
+    const currentStationSnap = await transaction.get(CURRENT_STATION('start'));
+    if (!currentStationSnap.exists()) {
       throw new Error('station-not-claimed');
     }
-
-    const data = snap.data();
-    if (data.assignedUid !== uid) {
+    if (currentStationSnap.data().assignedUid !== uid) {
       throw new Error('station-not-owned');
     }
 
+    const ref = RESULT_STATION('start');
+    const snap = await transaction.get(ref);
+
     transaction.set(ref, {
+      station: 'start',
       currentCourseId: courseId ?? null,
       currentCourseLabel: courseId ? (courseLabel ?? '') : '',
       currentCourseUpdatedAt: serverTimestamp(),
@@ -290,43 +310,14 @@ export async function setStartStationCourse({ uid, courseId, courseLabel }) {
 
 export async function releaseStation(station, uid) {
   log.info('releaseStation start', { station, uid });
-  await runTransaction(db, async (transaction) => {
-    const ref = RESULT_STATION(station);
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) return;
-    if (snap.data().assignedUid !== uid) return;
-    if (station === 'start') {
-      transaction.set(ref, {
-        assignedUid: null,
-        assignedEmail: '',
-        assignedProviderId: '',
-        assignedAt: deleteField(),
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-      return;
-    }
-
-    transaction.delete(ref);
-  });
+  await deleteDoc(CURRENT_STATION(station));
 }
 
 export async function releaseStationAsAdmin(station) {
   log.info('releaseStationAsAdmin start', { station });
-  const ref = RESULT_STATION(station);
+  const ref = CURRENT_STATION(station);
   const snap = await getDoc(ref);
   if (!snap.exists()) return;
-
-  if (station === 'start') {
-    await setDoc(ref, {
-      assignedUid: null,
-      assignedEmail: '',
-      assignedProviderId: '',
-      assignedAt: deleteField(),
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-    return;
-  }
-
   await deleteDoc(ref);
 }
 
@@ -362,7 +353,7 @@ export async function armCurrentCompetitor({
   const selectedAtClientIso = new Date(selectedAtClientMs).toISOString();
 
   await runTransaction(db, async (transaction) => {
-    const stationSnap = await transaction.get(RESULT_STATION('start'));
+    const stationSnap = await transaction.get(CURRENT_STATION('start'));
     if (!stationSnap.exists()) {
       throw new Error('station-not-claimed');
     }
@@ -412,7 +403,7 @@ export async function armCurrentCompetitor({
 export async function cancelCurrentCompetitor(runId, uid) {
   log.info('cancelCurrentCompetitor start', { runId, uid });
   await runTransaction(db, async (transaction) => {
-    const stationSnap = await transaction.get(RESULT_STATION('start'));
+    const stationSnap = await transaction.get(CURRENT_STATION('start'));
     if (!stationSnap.exists()) {
       throw new Error('station-not-claimed');
     }
@@ -875,10 +866,11 @@ export async function deleteCourseData(courseId) {
 
 export async function deleteAllResultsData() {
   log.info('deleteAllResultsData start');
-  const [allEvents, allRuns, allStations, currentSnap, allParticipants, allLightUsers, allLightRequests] = await Promise.all([
+  const [allEvents, allRuns, allStations, allCurrentStations, currentSnap, allParticipants, allLightUsers, allLightRequests] = await Promise.all([
     getDocs(collection(db, 'resultEvents')),
     getDocs(collection(db, 'resultRuns')),
     getDocs(collection(db, 'resultStations')),
+    getDocs(collection(db, 'currentStations')),
     getDoc(CURRENT_COMPETITOR),
     getDocs(collection(db, 'participants')),
     getDocs(collection(db, 'allowedResultUsers')),
@@ -889,6 +881,7 @@ export async function deleteAllResultsData() {
   allEvents.docs.forEach((entry) => batch.delete(entry.ref));
   allRuns.docs.forEach((entry) => batch.delete(entry.ref));
   allStations.docs.forEach((entry) => batch.delete(entry.ref));
+  allCurrentStations.docs.forEach((entry) => batch.delete(entry.ref));
   allParticipants.docs.forEach((entry) => batch.delete(entry.ref));
   allLightUsers.docs.forEach((entry) => batch.delete(entry.ref));
   allLightRequests.docs.forEach((entry) => batch.delete(entry.ref));
@@ -903,11 +896,12 @@ export async function deleteAllResultsData() {
 
 export async function exportAllResultsArchive() {
   log.info('exportAllResultsArchive start');
-  const [resultEvents, resultRuns, currentSnap, stationSnaps, participants, streamsSnap, allowedResultUsers, resultAccessRequests] = await Promise.all([
+  const [resultEvents, resultRuns, currentSnap, stationSnaps, currentStationSnaps, participants, streamsSnap, allowedResultUsers, resultAccessRequests] = await Promise.all([
     getAllDocs('resultEvents'),
     getAllDocs('resultRuns'),
     getDoc(CURRENT_COMPETITOR),
     getDocs(collection(db, 'resultStations')),
+    getDocs(collection(db, 'currentStations')),
     getAllDocs('participants'),
     getDoc(STREAMS_REF),
     getAllDocs('allowedResultUsers'),
@@ -915,6 +909,7 @@ export async function exportAllResultsArchive() {
   ]);
 
   const stations = stationSnaps.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+  const currentStations = currentStationSnaps.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
   const streams = streamsSnap.exists() ? (streamsSnap.data().streams ?? []) : [];
   const payload = {
     archiveType: RESULT_ARCHIVE_MODEL.name,
@@ -926,6 +921,7 @@ export async function exportAllResultsArchive() {
       resultRuns,
       currentCompetitor: currentSnap.exists() ? { id: currentSnap.id, ...currentSnap.data() } : null,
       resultStations: stations,
+      currentStations,
       participants,
       streams,
       allowedResultUsers,
@@ -963,10 +959,11 @@ export async function restoreCourseArchive(fileOrBlob) {
   const scope = parsed.scope || 'course';
 
   if (scope === 'all') {
-    const [allEvents, allRuns, allStations, currentSnap, allParticipants, allLightUsers, allLightRequests] = await Promise.all([
+    const [allEvents, allRuns, allStations, allCurrentStations, currentSnap, allParticipants, allLightUsers, allLightRequests] = await Promise.all([
       getDocs(collection(db, 'resultEvents')),
       getDocs(collection(db, 'resultRuns')),
       getDocs(collection(db, 'resultStations')),
+      getDocs(collection(db, 'currentStations')),
       getDoc(CURRENT_COMPETITOR),
       getDocs(collection(db, 'participants')),
       getDocs(collection(db, 'allowedResultUsers')),
@@ -975,6 +972,7 @@ export async function restoreCourseArchive(fileOrBlob) {
     allEvents.docs.forEach((entry) => batch.delete(entry.ref));
     allRuns.docs.forEach((entry) => batch.delete(entry.ref));
     allStations.docs.forEach((entry) => batch.delete(entry.ref));
+    allCurrentStations.docs.forEach((entry) => batch.delete(entry.ref));
     allParticipants.docs.forEach((entry) => batch.delete(entry.ref));
     allLightUsers.docs.forEach((entry) => batch.delete(entry.ref));
     allLightRequests.docs.forEach((entry) => batch.delete(entry.ref));
@@ -1013,6 +1011,13 @@ export async function restoreCourseArchive(fileOrBlob) {
       const { id, ...payload } = data.finishStation;
       batch.set(RESULT_STATION('finish'), payload, { merge: true });
     }
+  }
+
+  if (Array.isArray(data.currentStations)) {
+    data.currentStations.forEach((station) => {
+      const { id, ...payload } = station;
+      batch.set(doc(db, 'currentStations', id), payload, { merge: true });
+    });
   }
 
   if (scope === 'all') {

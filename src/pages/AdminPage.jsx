@@ -15,8 +15,8 @@ import {
   releaseStationAsAdmin,
   saveAllowedResultUser,
   subscribeAllowedResultUsers,
+  subscribeCurrentStationAssignment,
   subscribePendingResultAccessRequests,
-  subscribeStation,
 } from '../firebase/results';
 import { createLogger } from '../utils/logger';
 
@@ -58,10 +58,10 @@ export default function AdminPage({ currentUser }) {
   useEffect(() => subscribeAccessRequests(setRequests), []);
   useEffect(() => subscribeAllowedResultUsers(setAllowedResultUsers), []);
   useEffect(() => subscribePendingResultAccessRequests(setResultRequests), []);
-  useEffect(() => subscribeStation('start', (doc) => {
+  useEffect(() => subscribeCurrentStationAssignment('start', (doc) => {
     setStationAssignments((prev) => ({ ...prev, start: doc }));
   }), []);
-  useEffect(() => subscribeStation('finish', (doc) => {
+  useEffect(() => subscribeCurrentStationAssignment('finish', (doc) => {
     setStationAssignments((prev) => ({ ...prev, finish: doc }));
   }), []);
 

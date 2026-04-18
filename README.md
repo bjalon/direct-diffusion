@@ -195,6 +195,7 @@ allowedUsers/{email}
 accessRequests/{email}
 allowedResultUsers/{uid}
 resultAccessRequests/{uid}
+currentStations/{currentStart|currentFinish}
 resultStations/{start|finish}
 currentCompetitor/current
 resultEvents/{clickId}
@@ -214,6 +215,7 @@ The result workflow is intentionally simple:
 4. request access by entering an email
 5. wait for admin approval on the matching Firebase `uid`
 6. claim either the `start` or `finish` station
+   Station ownership is persisted in `currentStations/currentStart` or `currentStations/currentFinish`
 7. operate the station in real time using Firestore subscriptions
 
 Start clicks are buffered locally in the browser before synchronization. Once synced, each click is written as an immutable Firestore event with a server-side sync timestamp.

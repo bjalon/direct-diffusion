@@ -10,9 +10,11 @@ import {
   claimStation,
   completeCurrentCompetitor,
   mirrorPendingStartClicks,
+  readCurrentStationAssignment,
   releaseStation,
   setStartStationCourse,
   submitResultAccessRequest,
+  subscribeCurrentStationAssignment,
   subscribeCurrentCompetitor,
   subscribeResultAccess,
   subscribeResultAccessRequest,
@@ -50,7 +52,10 @@ export default function ResultsPage({ user, onLogout }) {
   const [resultRequest, setResultRequest] = useState(null);
   const [participants, setParticipants] = useState([]);
   const [selectedStation, setSelectedStation] = useState('');
+  const [selectedStationAssignment, setSelectedStationAssignment] = useState(null);
+  const [pendingStationSelection, setPendingStationSelection] = useState('');
   const [stationState, setStationState] = useState('idle');
+  const [stationRecoveryState, setStationRecoveryState] = useState('idle');
   const [stationError, setStationError] = useState('');
   const [stationDocs, setStationDocs] = useState({ start: null, finish: null });
   const [currentCompetitor, setCurrentCompetitor] = useState(null);
@@ -62,6 +67,7 @@ export default function ResultsPage({ user, onLogout }) {
   const [busyAction, setBusyAction] = useState('');
   const [depossessionNotice, setDepossessionNotice] = useState('');
   const [hadSelectedStationOwnership, setHadSelectedStationOwnership] = useState(false);
+  const [expectedStationRelease, setExpectedStationRelease] = useState('');
 
   useEffect(() => {
     if (user !== false || signInState === 'signing-in') return;
@@ -149,7 +155,11 @@ export default function ResultsPage({ user, onLogout }) {
         access: resultAccess,
       });
       setSelectedStation('');
-      return;
+      setSelectedStationAssignment(null);
+      setPendingStationSelection('');
+      setStationState('idle');
+      setStationRecoveryState('idle');
+      setHadSelectedStationOwnership(false);
     }
   }, [hasResultAccess, resultRequest, resultAccess]);
 
@@ -180,21 +190,150 @@ export default function ResultsPage({ user, onLogout }) {
   }, [canStart, canFinish, resumeVersion]);
 
   useEffect(() => {
-    if (!selectedStation || !actor || !hasResultAccess) return;
-    log.info('claiming station from results page', { station: selectedStation, actor });
-    setStationState('claiming');
-    setStationError('');
-    claimStation(selectedStation, actor)
-      .then(() => {
-        log.info('station claimed', { station: selectedStation, actorUid: actor.uid });
+    if (selectedStation || !actor?.uid || !user || user === false || !hasResultAccess) return;
+
+    let cancelled = false;
+    setStationRecoveryState('checking');
+
+    (async () => {
+      try {
+        const [startAssignment, finishAssignment] = await Promise.all([
+          readCurrentStationAssignment('start'),
+          readCurrentStationAssignment('finish'),
+        ]);
+        if (cancelled) return;
+
+        const ownedStation = startAssignment?.assignedUid === actor.uid
+          ? { station: 'start', assignment: startAssignment }
+          : finishAssignment?.assignedUid === actor.uid
+            ? { station: 'finish', assignment: finishAssignment }
+            : null;
+
+        if (!ownedStation) {
+          setSelectedStationAssignment(null);
+          setPendingStationSelection('');
+          setStationState('idle');
+          setStationRecoveryState('ready');
+          return;
+        }
+
+        const stillAllowed = ownedStation.station === 'start' ? canStart : canFinish;
+        if (!stillAllowed) {
+          log.warn('releasing stale station assignment after permission loss', {
+            station: ownedStation.station,
+            actorUid: actor.uid,
+          });
+          try {
+            await releaseStation(ownedStation.station, actor.uid);
+          } catch (error) {
+            log.warn('failed to release stale station assignment', {
+              station: ownedStation.station,
+              actorUid: actor.uid,
+              error,
+            });
+          }
+          if (cancelled) return;
+
+          setDepossessionNotice(`Votre accès au poste ${stationLabel(ownedStation.station)} a été retiré. Vous revenez au choix du poste.`);
+          setSelectedStation('');
+          setSelectedStationAssignment(null);
+          setPendingStationSelection('');
+          setStationState('idle');
+          setHadSelectedStationOwnership(false);
+          setStationRecoveryState('ready');
+          return;
+        }
+
+        log.info('restoring previously owned station on results page', {
+          station: ownedStation.station,
+          actorUid: actor.uid,
+        });
+        setStationError('');
+        setPendingStationSelection(ownedStation.station);
+        setSelectedStation(ownedStation.station);
+        setSelectedStationAssignment(ownedStation.assignment);
         setStationState('claimed');
-      })
-      .catch((error) => {
-        log.error('station claim failed', { station: selectedStation, error });
-        setStationState('error');
+        setStationRecoveryState('ready');
+      } catch (error) {
+        if (cancelled) return;
+        log.error('station restore failed', error);
+        setStationState('idle');
         setStationError(getErrorLabel(error));
+        setStationRecoveryState('ready');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedStation,
+    actor?.uid,
+    hasResultAccess,
+    canStart,
+    canFinish,
+    user,
+    resumeVersion,
+  ]);
+
+  useEffect(() => {
+    if (!selectedStation) {
+      setSelectedStationAssignment(null);
+      return;
+    }
+
+    return subscribeCurrentStationAssignment(
+      selectedStation,
+      (doc) => {
+        setSelectedStationAssignment(doc);
+      },
+      (error) => {
+        if (expectedStationRelease === selectedStation) return;
+        if (error?.code === 'permission-denied') {
+          setDepossessionNotice(`L’administrateur vous a retiré le poste ${stationLabel(selectedStation)}. Vous revenez au choix du poste.`);
+          setSelectedStation('');
+          setSelectedStationAssignment(null);
+          setPendingStationSelection('');
+          setStationState('idle');
+          setHadSelectedStationOwnership(false);
+          return;
+        }
+        setStationError(getErrorLabel(error));
+      },
+    );
+  }, [selectedStation, expectedStationRelease, resumeVersion]);
+
+  useEffect(() => {
+    if (!selectedStation || !actor?.uid) return;
+    const stillAllowed = selectedStation === 'start' ? canStart : canFinish;
+    if (stillAllowed || expectedStationRelease === selectedStation) return;
+
+    let cancelled = false;
+    setExpectedStationRelease(selectedStation);
+
+    releaseStation(selectedStation, actor.uid)
+      .catch((error) => {
+        log.warn('failed to release station after permission loss', {
+          station: selectedStation,
+          actorUid: actor.uid,
+          error,
+        });
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setExpectedStationRelease('');
+        setDepossessionNotice(`Votre accès au poste ${stationLabel(selectedStation)} a été retiré. Vous revenez au choix du poste.`);
+        setSelectedStation('');
+        setSelectedStationAssignment(null);
+        setPendingStationSelection('');
+        setStationState('idle');
+        setHadSelectedStationOwnership(false);
       });
-  }, [selectedStation, actor?.uid, hasResultAccess]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStation, actor?.uid, canStart, canFinish, expectedStationRelease]);
 
   useEffect(() => {
     const runId = currentCompetitor?.runId;
@@ -233,38 +372,111 @@ export default function ResultsPage({ user, onLogout }) {
     stationDocs.start?.currentCourseLabel,
   ]);
 
-  useEffect(() => () => {
-    if (selectedStation && actor?.uid) {
-      releaseStation(selectedStation, actor.uid).catch(() => {});
-    }
-  }, [selectedStation, actor?.uid]);
-
   useEffect(() => {
     if (!selectedStation || !actor?.uid) return;
-    const stationDoc = selectedStation === 'start' ? stationDocs.start : stationDocs.finish;
-    if (stationDoc?.assignedUid === actor.uid) {
+    if (selectedStationAssignment?.assignedUid === actor.uid) {
       setHadSelectedStationOwnership(true);
     }
-  }, [selectedStation, stationDocs.start?.assignedUid, stationDocs.finish?.assignedUid, actor?.uid]);
+  }, [selectedStation, selectedStationAssignment?.assignedUid, actor?.uid]);
 
   useEffect(() => {
-    if (!selectedStation || !actor?.uid || !hadSelectedStationOwnership) return;
-    const stationDoc = selectedStation === 'start' ? stationDocs.start : stationDocs.finish;
-    const stationLabel = selectedStation === 'start' ? 'départ' : 'arrivée';
-
-    if (!stationDoc) {
-      setDepossessionNotice(`Vous avez été dépossédé du poste ${stationLabel}. Les actions sont désormais bloquées tant que vous ne reprenez pas ce poste.`);
+    if (!selectedStation || !actor?.uid || !hadSelectedStationOwnership || expectedStationRelease === selectedStation) return;
+    if (!selectedStationAssignment) {
+      setDepossessionNotice(`L’administrateur vous a retiré le poste ${stationLabel(selectedStation)}. Vous revenez au choix du poste.`);
+      setSelectedStation('');
+      setPendingStationSelection('');
+      setStationState('idle');
+      setHadSelectedStationOwnership(false);
       return;
     }
 
-    if (!stationDoc.assignedUid || stationDoc.assignedUid !== actor.uid) {
-      setDepossessionNotice(`Vous avez été dépossédé du poste ${stationLabel}. Les actions sont désormais bloquées tant que vous ne reprenez pas ce poste.`);
+    if (selectedStationAssignment.assignedUid !== actor.uid) {
+      setDepossessionNotice(`L’administrateur vous a retiré le poste ${stationLabel(selectedStation)}. Vous revenez au choix du poste.`);
+      setSelectedStation('');
+      setSelectedStationAssignment(null);
+      setPendingStationSelection('');
+      setStationState('idle');
+      setHadSelectedStationOwnership(false);
     }
-  }, [selectedStation, stationDocs.start?.assignedUid, stationDocs.finish?.assignedUid, actor?.uid, hadSelectedStationOwnership]);
+  }, [
+    selectedStation,
+    selectedStationAssignment,
+    actor?.uid,
+    hadSelectedStationOwnership,
+    expectedStationRelease,
+  ]);
 
   useEffect(() => {
     setHadSelectedStationOwnership(false);
   }, [selectedStation]);
+
+  const handleClaimStation = async (station) => {
+    if (!actor || !hasResultAccess) return;
+    log.info('claiming station from results page', { station, actor });
+    setPendingStationSelection(station);
+    setStationState('claiming');
+    setStationError('');
+    try {
+      await claimStation(station, actor);
+      log.info('station claimed', { station, actorUid: actor.uid });
+      setSelectedStation(station);
+      setSelectedStationAssignment({
+        station,
+        assignedUid: actor.uid,
+        assignedEmail: actor.email ?? '',
+        assignedProviderId: actor.providerId ?? 'anonymous',
+      });
+      setStationState('claimed');
+    } catch (error) {
+      log.error('station claim failed', { station, error });
+      setStationState('idle');
+      setStationError(getErrorLabel(error));
+    }
+  };
+
+  const clearSelectedStationState = () => {
+    setSelectedStation('');
+    setSelectedStationAssignment(null);
+    setPendingStationSelection('');
+    setStationState('idle');
+    setHadSelectedStationOwnership(false);
+  };
+
+  const handleReleaseSelectedStation = async () => {
+    if (!selectedStation || !actor?.uid) return;
+    setExpectedStationRelease(selectedStation);
+    setActionError('');
+    try {
+      await releaseStation(selectedStation, actor.uid);
+      clearSelectedStationState();
+    } catch (error) {
+      log.error('station release failed', { station: selectedStation, actorUid: actor.uid, error });
+      setActionError(getErrorLabel(error));
+    } finally {
+      setExpectedStationRelease('');
+    }
+  };
+
+  const handleResultsLogout = async () => {
+    if (!selectedStation || !actor?.uid) {
+      onLogout();
+      return;
+    }
+
+    setExpectedStationRelease(selectedStation);
+    try {
+      await releaseStation(selectedStation, actor.uid);
+    } catch (error) {
+      log.warn('station release failed during logout', {
+        station: selectedStation,
+        actorUid: actor.uid,
+        error,
+      });
+    } finally {
+      setExpectedStationRelease('');
+      onLogout();
+    }
+  };
 
   if (user === false || signInState === 'signing-in') {
     return <ResultsLoadingCard label="Connexion anonyme du poste résultats…" />;
@@ -288,13 +500,13 @@ export default function ResultsPage({ user, onLogout }) {
         <ResultsErrorCard
           title="Accès TV uniquement"
           message="Ce compte léger peut accéder à l’affichage, aux flux et aux layouts, mais pas à la saisie résultats."
-          onLogout={onLogout}
+          onLogout={handleResultsLogout}
           actions={(
             <>
               <button className="btn btn-primary login-btn" onClick={() => navigate('/')}>
                 Aller sur Affichage
               </button>
-              <button className="btn btn-secondary login-btn" onClick={onLogout}>
+              <button className="btn btn-secondary login-btn" onClick={handleResultsLogout}>
                 Se déconnecter
               </button>
             </>
@@ -312,7 +524,7 @@ export default function ResultsPage({ user, onLogout }) {
             <div className="results-status-line"><strong>Email:</strong> {pendingLike.email || '—'}</div>
             <div className="results-status-line"><strong>UID:</strong> {user.uid}</div>
             <div className="results-status-line"><strong>Statut:</strong> {statusLabel(pendingLike.status)}</div>
-            <button className="btn btn-secondary login-btn" onClick={onLogout}>Se déconnecter</button>
+            <button className="btn btn-secondary login-btn" onClick={handleResultsLogout}>Se déconnecter</button>
           </div>
         </ResultsShell>
       );
@@ -364,7 +576,7 @@ export default function ResultsPage({ user, onLogout }) {
           <button className="btn btn-primary login-btn" type="submit" disabled={submitState === 'sending'}>
             {submitState === 'sending' ? 'Envoi…' : 'Envoyer la demande'}
           </button>
-          <button className="btn btn-secondary login-btn" type="button" onClick={onLogout}>
+          <button className="btn btn-secondary login-btn" type="button" onClick={handleResultsLogout}>
             Se déconnecter
           </button>
           {actionError && <div className="form-error">{actionError}</div>}
@@ -375,10 +587,16 @@ export default function ResultsPage({ user, onLogout }) {
 
   const handleDepossessionConfirm = () => {
     setDepossessionNotice('');
-    setSelectedStation('');
-    setStationState('idle');
-    setHadSelectedStationOwnership(false);
+    clearSelectedStationState();
   };
+
+  if (stationRecoveryState === 'checking') {
+    return <ResultsLoadingCard label="Restauration du poste résultats…" />;
+  }
+
+  if (stationState === 'claiming') {
+    return <ResultsLoadingCard label={`Réservation du poste ${stationLabel(pendingStationSelection)}…`} />;
+  }
 
   if (!selectedStation) {
     return (
@@ -388,52 +606,28 @@ export default function ResultsPage({ user, onLogout }) {
           titleAside={actor?.email || 'poste anonyme'}
           subtitle="Sélectionnez le poste que vous allez tenir."
         >
+          {stationError && <div className="form-error">{stationError}</div>}
           <div className="results-station-grid">
             {canStart && (
               <StationChoiceCard
                 station="start"
-                doc={stationDocs.start}
-                actorUid={actor?.uid}
-                onSelect={() => setSelectedStation('start')}
+                disabled={stationState === 'claiming'}
+                onSelect={() => handleClaimStation('start')}
               />
             )}
             {canFinish && (
               <StationChoiceCard
                 station="finish"
-                doc={stationDocs.finish}
-                actorUid={actor?.uid}
-                onSelect={() => setSelectedStation('finish')}
+                disabled={stationState === 'claiming'}
+                onSelect={() => handleClaimStation('finish')}
               />
             )}
           </div>
-          <button className="btn btn-secondary login-btn" onClick={onLogout}>Se déconnecter</button>
+          <button className="btn btn-secondary login-btn" onClick={handleResultsLogout}>Se déconnecter</button>
           <ClockStatusPanel clockState={clockState} />
         </ResultsShell>
         <ResultsNoticeDialog message={depossessionNotice} onConfirm={handleDepossessionConfirm} />
       </>
-    );
-  }
-
-  if (stationState === 'claiming') {
-    return <ResultsLoadingCard label={`Réservation du poste ${selectedStation === 'start' ? 'départ' : 'arrivée'}…`} />;
-  }
-
-  if (stationState === 'error') {
-    return (
-      <ResultsErrorCard
-        title="Poste indisponible"
-        message={stationError || 'Ce poste est déjà utilisé sur un autre appareil.'}
-        actions={(
-          <>
-            {(canStart && canFinish) && (
-              <button className="btn btn-secondary login-btn" onClick={() => { setSelectedStation(''); setStationState('idle'); }}>
-                Changer de poste
-              </button>
-            )}
-            <button className="btn btn-secondary login-btn" onClick={onLogout}>Se déconnecter</button>
-          </>
-        )}
-      />
     );
   }
 
@@ -442,7 +636,7 @@ export default function ResultsPage({ user, onLogout }) {
       <>
         <StartStationView
           actor={actor}
-          stationDoc={stationDocs.start}
+          ownsStation={selectedStationAssignment?.assignedUid === actor.uid}
           participants={participants}
           resultEvents={resultEvents}
           currentCompetitor={currentCompetitor}
@@ -456,12 +650,8 @@ export default function ResultsPage({ user, onLogout }) {
           setCourseDraft={setCourseDraft}
           currentCourse={currentCourse}
           setCurrentCourse={setCurrentCourse}
-          onReleaseStation={async () => {
-            await releaseStation('start', actor.uid);
-            setSelectedStation('');
-            setStationState('idle');
-          }}
-          onLogout={onLogout}
+          onReleaseStation={handleReleaseSelectedStation}
+          onLogout={handleResultsLogout}
           showUnavailableNotice={!depossessionNotice}
         />
         <ResultsNoticeDialog message={depossessionNotice} onConfirm={handleDepossessionConfirm} />
@@ -473,18 +663,14 @@ export default function ResultsPage({ user, onLogout }) {
     <>
       <FinishStationView
         actor={actor}
-        stationDoc={stationDocs.finish}
+        ownsStation={selectedStationAssignment?.assignedUid === actor.uid}
         currentCompetitor={currentCompetitor}
         busyAction={busyAction}
         setBusyAction={setBusyAction}
         actionError={actionError}
         setActionError={setActionError}
-        onReleaseStation={async () => {
-          await releaseStation('finish', actor.uid);
-          setSelectedStation('');
-          setStationState('idle');
-        }}
-        onLogout={onLogout}
+        onReleaseStation={handleReleaseSelectedStation}
+        onLogout={handleResultsLogout}
         showUnavailableNotice={!depossessionNotice}
       />
       <ResultsNoticeDialog message={depossessionNotice} onConfirm={handleDepossessionConfirm} />
@@ -494,7 +680,7 @@ export default function ResultsPage({ user, onLogout }) {
 
 function StartStationView({
   actor,
-  stationDoc,
+  ownsStation,
   participants,
   resultEvents,
   currentCompetitor,
@@ -512,7 +698,6 @@ function StartStationView({
   onLogout,
   showUnavailableNotice,
 }) {
-  const ownsStation = stationDoc?.assignedUid === actor.uid;
   const ownsCurrent = currentCompetitor?.selectedByUid === actor.uid;
   const isArmed = ownsCurrent && currentCompetitor?.status === 'armed';
   const isRunning = currentCompetitor?.status === 'running';
@@ -909,7 +1094,7 @@ function StartStationHeader({
 
 function FinishStationView({
   actor,
-  stationDoc,
+  ownsStation,
   currentCompetitor,
   busyAction,
   setBusyAction,
@@ -919,7 +1104,6 @@ function FinishStationView({
   onLogout,
   showUnavailableNotice,
 }) {
-  const ownsStation = stationDoc?.assignedUid === actor.uid;
   const startClickCount = Array.isArray(currentCompetitor?.pendingStartClicks)
     ? currentCompetitor.pendingStartClicks.length
     : 0;
@@ -1042,16 +1226,13 @@ function InlineStationHeader({ title, email }) {
   );
 }
 
-function StationChoiceCard({ station, doc, actorUid, onSelect }) {
-  const busy = doc?.assignedUid && doc.assignedUid !== actorUid;
+function StationChoiceCard({ station, disabled = false, onSelect }) {
   const label = station === 'start' ? 'Départ' : 'Arrivée';
 
   return (
-    <button className="results-station-card" disabled={busy} onClick={onSelect}>
+    <button className="results-station-card" disabled={disabled} onClick={onSelect}>
       <div className="results-station-title">{label}</div>
-      <div className="results-station-subtitle">
-        {busy ? `Occupé par ${doc.assignedEmail || doc.assignedUid}` : 'Disponible'}
-      </div>
+      <div className="results-station-subtitle">Sélectionner ce poste</div>
     </button>
   );
 }
@@ -1182,6 +1363,10 @@ function ResultsErrorCard({ title, message, onLogout, actions }) {
 
 function primaryProvider(user) {
   return user?.providerData?.[0]?.providerId || 'anonymous';
+}
+
+function stationLabel(station) {
+  return station === 'finish' ? 'arrivée' : 'départ';
 }
 
 function useResultsResumeVersion() {

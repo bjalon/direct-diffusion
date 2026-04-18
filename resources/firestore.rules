@@ -71,19 +71,53 @@ service cloud.firestore {
              || (stationId == 'finish' && hasResultRole('results_finish'));
     }
 
-    function canClaimStation(stationId) {
-      return canManageStation(stationId)
-             && request.resource.data.assignedUid == request.auth.uid
-             && (!exists(/databases/$(database)/documents/resultStations/$(stationId))
-                 || resource.data.assignedUid == null
-                 || resource.data.assignedUid == request.auth.uid);
+    function currentStationDocId(stationId) {
+      return stationId == 'start'
+        ? 'currentStart'
+        : stationId == 'finish'
+          ? 'currentFinish'
+          : '__invalid__';
     }
 
-    function canReleaseStation(stationId) {
-      return canManageStation(stationId)
-             && exists(/databases/$(database)/documents/resultStations/$(stationId))
-             && resource.data.assignedUid == request.auth.uid
-             && request.resource.data.assignedUid == null;
+    function currentStationExists(docId) {
+      return exists(/databases/$(database)/documents/currentStations/$(docId));
+    }
+
+    function currentStationOwnedByRequester(docId) {
+      return currentStationExists(docId)
+             && get(/databases/$(database)/documents/currentStations/$(docId)).data.assignedUid == request.auth.uid;
+    }
+
+    function ownsCurrentStation(stationId) {
+      return currentStationOwnedByRequester(currentStationDocId(stationId));
+    }
+
+    function canReadCurrentStation(docId) {
+      return isAdministration()
+             || currentStationOwnedByRequester(docId)
+             || (currentStationMatchesRole(docId) && !currentStationExists(docId));
+    }
+
+    function currentStationMatchesRole(docId) {
+      return (docId == 'currentStart' && hasResultRole('results_start'))
+             || (docId == 'currentFinish' && hasResultRole('results_finish'));
+    }
+
+    function validCurrentStationPayload(docId) {
+      return request.resource.data.assignedUid == request.auth.uid
+             && request.resource.data.station == (
+               docId == 'currentStart'
+                 ? 'start'
+                 : docId == 'currentFinish'
+                   ? 'finish'
+                   : '__invalid__'
+             );
+    }
+
+    function canClaimCurrentStation(docId) {
+      return currentStationMatchesRole(docId)
+             && validCurrentStationPayload(docId)
+             && (!currentStationExists(docId) || currentStationOwnedByRequester(docId));
     }
 
     function hasOnlyTvRole(data) {
@@ -141,16 +175,27 @@ service cloud.firestore {
 
     match /resultStations/{stationId} {
       allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
-      allow create, update: if isAdministration() || canClaimStation(stationId) || canReleaseStation(stationId);
-      allow delete: if isAdministration()
-                    || (canManageStation(stationId)
-                        && resource.data.assignedUid == request.auth.uid);
+      allow create, update: if isAdministration() || (canManageStation(stationId) && ownsCurrentStation(stationId));
+      allow delete: if isAdministration();
+    }
+
+    match /currentStations/{docId} {
+      allow get: if canReadCurrentStation(docId);
+      allow list: if isAdministration();
+      allow create, update: if isAdministration() || canClaimCurrentStation(docId);
+      allow delete: if isAdministration() || currentStationOwnedByRequester(docId);
     }
 
     match /currentCompetitor/{docId} {
       allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
-      allow create, update: if isAdministration() || (docId == 'current' && hasResultRole('results_start'));
-      allow delete: if isAdministration() || (docId == 'current' && (hasResultRole('results_start') || hasResultRole('results_finish')));
+      allow create, update: if isAdministration()
+                            || (docId == 'current'
+                                && hasResultRole('results_start')
+                                && ownsCurrentStation('start'));
+      allow delete: if isAdministration()
+                    || (docId == 'current'
+                        && ((hasResultRole('results_start') && ownsCurrentStation('start'))
+                            || (hasResultRole('results_finish') && ownsCurrentStation('finish'))));
     }
 
     match /resultEvents/{eventId} {
