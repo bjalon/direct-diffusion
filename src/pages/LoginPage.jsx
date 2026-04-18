@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GoogleAuthProvider, signInAnonymously, signInWithPopup } from 'firebase/auth';
+import AnonymousAccountList from '../components/AnonymousAccountList';
 import { auth } from '../firebase';
 import { submitResultAccessRequest } from '../firebase/results';
 import { createLogger } from '../utils/logger';
+import { forgetAnonymousAccount, listAnonymousAccounts, restoreAnonymousAccount } from '../utils/anonymousAccounts';
 
 const googleProvider = new GoogleAuthProvider();
 const log = createLogger('LoginPage');
@@ -15,6 +17,13 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
   const [requestEmail, setRequestEmail] = useState('');
   const [requestStatus, setRequestStatus] = useState('idle');
   const [requestError, setRequestError] = useState('');
+  const [knownAccounts, setKnownAccounts] = useState(() => listAnonymousAccounts(auth));
+  const [resumeUid, setResumeUid] = useState('');
+  const [resumeError, setResumeError] = useState('');
+
+  useEffect(() => {
+    setKnownAccounts(listAnonymousAccounts(auth));
+  }, [user?.uid, user === false]);
 
   async function handleGoogleSignIn() {
     setStatus('sending');
@@ -62,6 +71,32 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
       log.error('lightweight access request failed', err);
       setRequestStatus('error');
       setRequestError(getErrorLabel(err.code || err.message));
+    }
+  }
+
+  async function handleResumeAnonymous(uid) {
+    if (!uid) return;
+
+    setResumeUid(uid);
+    setResumeError('');
+    try {
+      log.info('restoring anonymous account', { uid });
+      await restoreAnonymousAccount(auth, uid);
+      log.info('anonymous account restored', { uid });
+    } catch (err) {
+      log.error('anonymous account restore failed', { uid, error: err });
+      setKnownAccounts(listAnonymousAccounts(auth));
+      setResumeError('Impossible de reprendre ce compte léger local. Il a été retiré de la liste.');
+    } finally {
+      setResumeUid('');
+    }
+  }
+
+  function handleDeleteAnonymous(uid) {
+    forgetAnonymousAccount(auth, uid);
+    setKnownAccounts(listAnonymousAccounts(auth));
+    if (resumeUid === uid) {
+      setResumeUid('');
     }
   }
 
@@ -129,6 +164,24 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
           {status === 'sending' ? 'Connexion…' : 'Se connecter avec Google'}
         </button>
         {status === 'error' && <div className="form-error">{errorMsg}</div>}
+
+        {knownAccounts.length > 0 && (
+          <>
+            <div className="login-divider"><span>comptes légers</span></div>
+            <div className="login-form">
+              <p className="login-subtitle">
+                Reprendre un compte léger déjà utilisé sur ce navigateur.
+              </p>
+              <AnonymousAccountList
+                accounts={knownAccounts}
+                onSelect={handleResumeAnonymous}
+                onDelete={handleDeleteAnonymous}
+                disabled={status === 'sending' || requestStatus === 'sending' || !!resumeUid}
+              />
+              {resumeError && <div className="form-error">{resumeError}</div>}
+            </div>
+          </>
+        )}
 
         <div className="login-divider"><span>ou</span></div>
 

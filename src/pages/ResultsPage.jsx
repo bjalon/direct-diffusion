@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signInAnonymously } from 'firebase/auth';
+import AnonymousAccountList from '../components/AnonymousAccountList';
 import { auth, ensureFirestoreOnline } from '../firebase';
 import { subscribeParticipants } from '../firebase/participants';
 import {
@@ -30,6 +31,7 @@ import {
   saveStartBuffer,
 } from '../utils/resultsBuffer';
 import { createLogger } from '../utils/logger';
+import { forgetAnonymousAccount, listAnonymousAccounts, restoreAnonymousAccount } from '../utils/anonymousAccounts';
 import { deriveFinishedCourses, deriveGeneralRanking, deriveRunsFromEvents } from '../utils/resultsDerivation';
 
 const log = createLogger('ResultsPage');
@@ -39,6 +41,7 @@ export default function ResultsPage({ user, onLogout }) {
   const navigate = useNavigate();
   useResultsResumeLifecycle();
   const [signInState, setSignInState] = useState('idle');
+  const [knownAccounts, setKnownAccounts] = useState(() => listAnonymousAccounts(auth));
   const [clockState, setClockState] = useState({
     status: 'pending',
     driftMs: 0,
@@ -70,6 +73,11 @@ export default function ResultsPage({ user, onLogout }) {
   const [expectedStationRelease, setExpectedStationRelease] = useState('');
   const [resultsBrowserView, setResultsBrowserView] = useState('station');
   const [resultsBrowserCourseId, setResultsBrowserCourseId] = useState('');
+
+  useEffect(() => {
+    if (user !== false) return;
+    setKnownAccounts(listAnonymousAccounts(auth));
+  }, [user?.uid, user === false]);
 
   const clearSelectedStationState = (nextStationError = '') => {
     setSelectedStation('');
@@ -118,6 +126,7 @@ export default function ResultsPage({ user, onLogout }) {
 
   useEffect(() => {
     if (user !== false || signInState === 'signing-in') return;
+    if (knownAccounts.length > 0) return;
     log.info('starting anonymous sign-in for results page');
     setSignInState('signing-in');
     signInAnonymously(auth)
@@ -133,7 +142,47 @@ export default function ResultsPage({ user, onLogout }) {
         setSignInState('error');
         setActionError(getErrorLabel(error));
       });
-  }, [user, signInState]);
+  }, [user, signInState, knownAccounts.length]);
+
+  const handleResultsAnonymousSignIn = async () => {
+    log.info('starting anonymous sign-in for results page from chooser');
+    setSignInState('signing-in');
+    setActionError('');
+    try {
+      const credential = await signInAnonymously(auth);
+      log.info('anonymous sign-in succeeded', {
+        uid: credential.user.uid,
+        isAnonymous: credential.user.isAnonymous,
+      });
+      setSignInState('done');
+    } catch (error) {
+      log.error('anonymous sign-in failed', error);
+      setSignInState('error');
+      setActionError(getErrorLabel(error));
+    }
+  };
+
+  const handleRestoreAnonymousSignIn = async (uid) => {
+    if (!uid) return;
+    log.info('restoring anonymous results account', { uid });
+    setSignInState('signing-in');
+    setActionError('');
+    try {
+      await restoreAnonymousAccount(auth, uid);
+      log.info('anonymous results account restored', { uid });
+      setSignInState('done');
+    } catch (error) {
+      log.error('anonymous results account restore failed', { uid, error });
+      setKnownAccounts(listAnonymousAccounts(auth));
+      setSignInState('error');
+      setActionError('Impossible de reprendre ce compte léger local.');
+    }
+  };
+
+  const handleDeleteAnonymousSignIn = (uid) => {
+    forgetAnonymousAccount(auth, uid);
+    setKnownAccounts(listAnonymousAccounts(auth));
+  };
 
   useEffect(() => {
     if (!user || user === false) return;
@@ -541,6 +590,27 @@ export default function ResultsPage({ user, onLogout }) {
       onLogout();
     }
   };
+
+  if (user === false && signInState !== 'signing-in' && knownAccounts.length > 0) {
+    return (
+      <ResultsShell
+        title="Connexion résultats"
+        subtitle="Reprenez un compte léger déjà utilisé ou créez un nouveau compte pour ce poste."
+      >
+        <div className="login-form">
+          <AnonymousAccountList
+            accounts={knownAccounts}
+            onSelect={handleRestoreAnonymousSignIn}
+            onDelete={handleDeleteAnonymousSignIn}
+          />
+          <button className="btn btn-secondary login-btn" type="button" onClick={handleResultsAnonymousSignIn}>
+            Utiliser un nouveau compte léger
+          </button>
+          {actionError && <div className="form-error">{actionError}</div>}
+        </div>
+      </ResultsShell>
+    );
+  }
 
   if (user === false || signInState === 'signing-in') {
     return <ResultsLoadingCard label="Connexion anonyme du poste résultats…" />;

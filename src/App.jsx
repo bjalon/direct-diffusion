@@ -7,6 +7,7 @@ import { getUserRoles, saveStreams, seedStreamsIfEmpty, subscribeStreams } from 
 import NavBar from './components/NavBar';
 import { buildSrcFromUrl, normalizeFacebookEmbedSrc } from './utils/iframeParser';
 import { createLogger } from './utils/logger';
+import { rememberAnonymousAccount } from './utils/anonymousAccounts';
 import { loadConfig, normalizeConfigState, saveConfig } from './utils/storage';
 import AdminPage from './pages/AdminPage';
 import ConfigPage from './pages/ConfigPage';
@@ -124,6 +125,29 @@ export default function App() {
     }
     return subscribeResultAccessRequest(user.uid, setDeviceRequest);
   }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.isAnonymous) return;
+    rememberAnonymousAccount(auth, user, {
+      email: deviceAccess?.email || deviceRequest?.email || user.email || '',
+      roles: {
+        tv: !!deviceAccess?.tv,
+        results_start: !!deviceAccess?.results_start,
+        results_finish: !!deviceAccess?.results_finish,
+      },
+      requestStatus: deviceRequest?.status || '',
+    });
+  }, [
+    user?.uid,
+    user?.isAnonymous,
+    user?.email,
+    deviceAccess?.email,
+    deviceAccess?.tv,
+    deviceAccess?.results_start,
+    deviceAccess?.results_finish,
+    deviceRequest?.email,
+    deviceRequest?.status,
+  ]);
 
   useEffect(() => {
     const canReadStreams = (!user || user === false)
@@ -256,7 +280,20 @@ function AppShell({
   deviceRequest,
 }) {
   const { pathname } = useLocation();
-  const handleLogout = () => signOut(auth);
+  const handleLogout = async () => {
+    if (user?.isAnonymous) {
+      rememberAnonymousAccount(auth, user, {
+        email: deviceAccess?.email || deviceRequest?.email || user.email || '',
+        roles: {
+          tv: !!deviceAccess?.tv,
+          results_start: !!deviceAccess?.results_start,
+          results_finish: !!deviceAccess?.results_finish,
+        },
+        requestStatus: deviceRequest?.status || '',
+      });
+    }
+    await signOut(auth);
+  };
   const hasLightResultsAccess = !!(user?.isAnonymous && (deviceAccess?.results_start || deviceAccess?.results_finish));
   const showNavbar = pathname !== '/results' && !!user && user !== false && !!permissions;
 

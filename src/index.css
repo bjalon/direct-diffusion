@@ -193,6 +193,89 @@ html, body, #root {
   gap: 10px;
 }
 
+.login-account-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.login-account-row {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.login-account-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+
+.login-account-btn--select {
+  flex: 1;
+}
+
+.login-account-btn:hover {
+  background: var(--panel-hover);
+  border-color: rgba(24, 119, 242, 0.45);
+  transform: translateY(-1px);
+}
+
+.login-account-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+  transform: none;
+}
+
+.login-account-primary {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.login-account-meta {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.login-account-delete {
+  width: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(229, 57, 53, 0.2);
+  border-radius: 10px;
+  background: rgba(229, 57, 53, 0.06);
+  color: var(--danger);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s, opacity 0.15s;
+}
+
+.login-account-delete:hover {
+  background: rgba(229, 57, 53, 0.14);
+  border-color: rgba(229, 57, 53, 0.38);
+  transform: translateY(-1px);
+}
+
+.login-account-delete:disabled {
+  opacity: 0.7;
+  cursor: default;
+  transform: none;
+}
+
 .login-btn {
   width: 100%;
   justify-content: center;
