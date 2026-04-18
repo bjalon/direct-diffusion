@@ -307,7 +307,7 @@ export default function ConfigPage({ config, onUpdate }) {
             />
             <NumberSetting
               label="Vitesse de scroll"
-              value={config.virtualDisplayScrollSpeed ?? 28}
+              value={config.virtualDisplayScrollSpeed ?? 280}
               min={5}
               max={200}
               step={1}
@@ -334,7 +334,7 @@ export default function ConfigPage({ config, onUpdate }) {
           {videoStreams.length === 0 && <div className="stream-empty">Aucun flux ajouté pour l'instant.</div>}
           {videoStreams.map((stream) => (
             <div key={stream.id} className="stream-item">
-              <div className="stream-thumb" title="Flux Facebook">
+              <div className="stream-thumb" title="Flux vidéo">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M21.582 6.186a2.506 2.506 0 0 0-1.765-1.77C18.254 4 12 4 12 4s-6.254 0-7.817.416a2.506 2.506 0 0 0-1.765 1.77C2 7.757 2 12 2 12s0 4.243.418 5.814a2.506 2.506 0 0 0 1.765 1.77C5.746 20 12 20 12 20s6.254 0 7.817-.416a2.506 2.506 0 0 0 1.765-1.77C22 16.243 22 12 22 12s0-4.243-.418-5.814zM10 15.464V8.536L16 12l-6 3.464z" />
                 </svg>

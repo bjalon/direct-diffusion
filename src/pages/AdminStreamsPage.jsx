@@ -156,7 +156,7 @@ export default function AdminStreamsPage() {
   const handleSaveDialog = async () => {
     const parsed = parseInput(dialogState.input);
     if (!parsed) {
-      setError('Format invalide. Collez un lien Facebook ou un code iframe complet.');
+      setError('Format invalide. Collez un lien Facebook, un lien YouTube, ou un code iframe complet.');
       return;
     }
 
@@ -226,7 +226,7 @@ export default function AdminStreamsPage() {
           <div className="stream-list">
             {videoStreams.map((stream) => (
               <div key={stream.id} className="stream-item">
-                <div className="stream-thumb" title="Flux Facebook">
+                <div className="stream-thumb" title="Flux vidéo">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M21.582 6.186a2.506 2.506 0 0 0-1.765-1.77C18.254 4 12 4 12 4s-6.254 0-7.817.416a2.506 2.506 0 0 0-1.765 1.77C2 7.757 2 12 2 12s0 4.243.418 5.814a2.506 2.506 0 0 0 1.765 1.77C5.746 20 12 20 12 20s6.254 0 7.817-.416a2.506 2.506 0 0 0 1.765-1.77C22 16.243 22 12 22 12s0-4.243-.418-5.814zM10 15.464V8.536L16 12l-6 3.464z" />
                   </svg>
@@ -273,7 +273,7 @@ export default function AdminStreamsPage() {
               {dialogState.mode === 'edit' ? 'Modifier le flux' : 'Ajouter un flux'}
             </div>
             <div className="dialog-desc">
-              Définissez le nom, l’URL Facebook ou l’iframe, puis l’orientation du flux.
+              Définissez le nom, l’URL Facebook / YouTube ou l’iframe, puis l’orientation du flux.
             </div>
 
             <label className="form-label">Nom du flux</label>
@@ -284,10 +284,10 @@ export default function AdminStreamsPage() {
               onChange={(e) => setDialogState((prev) => ({ ...prev, label: e.target.value }))}
             />
 
-            <label className="form-label">Lien ou code iframe Facebook</label>
+            <label className="form-label">Lien vidéo ou code iframe</label>
             <textarea
               className="form-textarea"
-              placeholder={'Lien Facebook :\nhttps://www.facebook.com/xxx/videos/yyy/\n\nou code iframe complet :\n<iframe src="https://www.facebook.com/plugins/video.php?..." ...>'}
+              placeholder={'Lien Facebook :\nhttps://www.facebook.com/xxx/videos/yyy/\n\nLien YouTube :\nhttps://www.youtube.com/watch?v=xxxxxxxxxxx\nhttps://youtu.be/xxxxxxxxxxx\n\nou code iframe complet :\n<iframe src="https://www.youtube.com/embed/..." ...>'}
               value={dialogState.input}
               onChange={(e) => handleDialogInputChange(e.target.value)}
               rows={6}
