@@ -185,7 +185,11 @@ export default function ConfigPage({ config, onUpdate }) {
                   {stream.videoUrl}
                 </div>
               </div>
-              <div className="admin-subline">Rotation : {streamRotation(stream)}°</div>
+              <div className="admin-subline">
+                Rotation : {streamRotation(stream)}°
+                {stream.broadcastState === 'live' ? ' • Live' : ''}
+                {stream.broadcastState === 'replay' ? ' • Rediffusion' : ''}
+              </div>
             </div>
           ))}
         </div>

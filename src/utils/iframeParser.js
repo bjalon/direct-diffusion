@@ -3,6 +3,24 @@
  * @param {string} htmlCode - Raw HTML containing an <iframe> tag
  * @returns {{ src: string, videoUrl: string, originalWidth: number, originalHeight: number } | null}
  */
+export function normalizeFacebookEmbedSrc(src) {
+  try {
+    const url = new URL(src);
+    const isFacebookHost = /(^|\.)facebook\.com$/i.test(url.hostname);
+    const isEmbeddedVideoPath = url.pathname === '/plugins/video.php' || url.pathname === '/video/embed';
+
+    if (!isFacebookHost || !isEmbeddedVideoPath) {
+      return src;
+    }
+
+    url.searchParams.set('autoplay', 'true');
+    url.searchParams.set('loop', 'true');
+    return url.toString();
+  } catch {
+    return src;
+  }
+}
+
 export function parseIframe(htmlCode) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlCode.trim(), 'text/html');
@@ -21,7 +39,7 @@ export function parseIframe(htmlCode) {
     const orientation = originalHeight > originalWidth ? 'portrait' : 'landscape';
 
     return {
-      src,
+      src: normalizeFacebookEmbedSrc(src),
       videoUrl,
       originalWidth,
       originalHeight,
@@ -40,6 +58,8 @@ export function parseIframe(htmlCode) {
 export function buildSrcFromUrl(videoUrl, width = 267, height = 476) {
   const params = new URLSearchParams({
     href: videoUrl,
+    autoplay: 'true',
+    loop: 'true',
     show_text: 'false',
     width: String(width),
     height: String(height),

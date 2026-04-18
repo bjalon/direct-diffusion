@@ -433,6 +433,68 @@ html, body, #root {
   border: none;
 }
 
+.video-broadcast-badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(184, 18, 27, 0.96);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.video-broadcast-badge-replay {
+  background: rgba(145, 16, 24, 0.96);
+}
+
+.video-broadcast-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.55);
+  animation: video-live-pulse 1.8s infinite;
+}
+
+@keyframes video-live-pulse {
+  0% {
+    transform: scale(0.85);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.5);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 10px rgba(255, 255, 255, 0);
+  }
+  100% {
+    transform: scale(0.85);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+.facebook-video-host,
+.facebook-video-embed,
+.facebook-video-embed > span,
+.facebook-video-embed iframe {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.facebook-video-host,
+.facebook-video-embed iframe {
+  display: block;
+  border: none;
+}
+
 .video-empty {
   display: flex;
   flex-direction: column;
@@ -446,6 +508,15 @@ html, body, #root {
 .video-empty span {
   font-size: 12px;
   letter-spacing: 0.5px;
+}
+
+@media (max-width: 900px) {
+  .video-broadcast-badge {
+    top: 10px;
+    left: 10px;
+    padding: 7px 12px;
+    font-size: 12px;
+  }
 }
 
 /* ── Config page ── */

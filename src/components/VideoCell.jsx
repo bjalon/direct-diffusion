@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
 import ResultsRotationDisplay from './displays/ResultsRotationDisplay';
+import FacebookVideoEmbed from './FacebookVideoEmbed';
 
 const VIRTUAL_COMPONENTS = {
   'results-rotation': (s) => (
@@ -53,9 +54,45 @@ function computeTransform(cellW, cellH, origW, origH, rotation) {
   return { left, top, transform };
 }
 
+function isFacebookHost(value) {
+  try {
+    return /(^|\.)facebook\.com$/i.test(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function resolveFacebookVideoUrl(stream) {
+  if (stream.videoUrl && isFacebookHost(stream.videoUrl)) {
+    return stream.videoUrl;
+  }
+
+  if (!stream.src || !isFacebookHost(stream.src)) {
+    return null;
+  }
+
+  try {
+    const url = new URL(stream.src);
+    return url.searchParams.get('href') || null;
+  } catch {
+    return null;
+  }
+}
+
+function getBroadcastBadge(stream) {
+  if (stream?.broadcastState === 'live') {
+    return { label: 'Live', className: 'video-broadcast-badge-live', withPulse: true };
+  }
+  if (stream?.broadcastState === 'replay') {
+    return { label: 'Rediffusion', className: 'video-broadcast-badge-replay', withPulse: false };
+  }
+  return null;
+}
+
 export default function VideoCell({ stream, slotIndex }) {
   const containerRef = useRef(null);
   const [size, setSize] = useState(null);
+  const broadcastBadge = getBroadcastBadge(stream);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -106,6 +143,36 @@ export default function VideoCell({ stream, slotIndex }) {
     const { left, top, transform } = computeTransform(
       size.width, size.height, origW, origH, rotation
     );
+    const facebookVideoUrl = resolveFacebookVideoUrl(stream);
+
+    if (facebookVideoUrl) {
+      return (
+        <div
+          key={`${stream.id}-${slotIndex}-${rotation}-${origW}x${origH}`}
+          style={{
+            position: 'absolute',
+            left: `${left}px`,
+            top: `${top}px`,
+            width: `${origW}px`,
+            height: `${origH}px`,
+            display: 'block',
+            transformOrigin: 'center center',
+            transform,
+            overflow: 'hidden',
+          }}
+        >
+          <FacebookVideoEmbed
+            embedKey={`${stream.id}-${slotIndex}`}
+            videoUrl={facebookVideoUrl}
+            width={origW}
+            height={origH}
+            fallbackSrc={stream.src}
+            autoplay
+            loop
+          />
+        </div>
+      );
+    }
 
     return (
       <iframe
@@ -133,6 +200,12 @@ export default function VideoCell({ stream, slotIndex }) {
   return (
     <div ref={containerRef} className="video-cell">
       {renderContent()}
+      {broadcastBadge && (
+        <div className={`video-broadcast-badge ${broadcastBadge.className}`}>
+          {broadcastBadge.withPulse && <span className="video-broadcast-dot" />}
+          <span>{broadcastBadge.label}</span>
+        </div>
+      )}
     </div>
   );
 }

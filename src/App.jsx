@@ -5,7 +5,7 @@ import { auth } from './firebase';
 import { requestAccess } from './firebase/admin';
 import { getUserRoles, saveStreams, seedStreamsIfEmpty, subscribeStreams } from './firebase/streams';
 import NavBar from './components/NavBar';
-import { buildSrcFromUrl } from './utils/iframeParser';
+import { buildSrcFromUrl, normalizeFacebookEmbedSrc } from './utils/iframeParser';
 import { createLogger } from './utils/logger';
 import { loadConfig, saveConfig } from './utils/storage';
 import AdminPage from './pages/AdminPage';
@@ -27,6 +27,10 @@ function orientationToRotation(orientation) {
   return map[orientation] ?? 0;
 }
 
+function normalizeBroadcastState(value) {
+  return value === 'live' || value === 'replay' ? value : 'none';
+}
+
 function normaliseStream(raw) {
   if (!raw || !raw.id) return null;
   const origW = raw.originalWidth ?? 267;
@@ -34,10 +38,21 @@ function normaliseStream(raw) {
   const rotation = typeof raw.rotation === 'number'
     ? raw.rotation
     : orientationToRotation(raw.orientation);
-  const base = { id: raw.id, rotation, originalWidth: origW, originalHeight: origH };
+  const base = {
+    id: raw.id,
+    rotation,
+    originalWidth: origW,
+    originalHeight: origH,
+    broadcastState: normalizeBroadcastState(raw.broadcastState),
+  };
 
   if (raw.src) {
-    return { ...base, label: raw.label ?? raw.src, src: raw.src, videoUrl: raw.videoUrl ?? raw.src };
+    return {
+      ...base,
+      label: raw.label ?? raw.src,
+      src: normalizeFacebookEmbedSrc(raw.src),
+      videoUrl: raw.videoUrl ?? raw.src,
+    };
   }
   if (raw.url) {
     return { ...base, label: raw.label ?? raw.url, src: buildSrcFromUrl(raw.url, origW, origH), videoUrl: raw.url };

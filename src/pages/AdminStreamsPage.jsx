@@ -13,16 +13,46 @@ const ROTATION_OPTIONS = [
   { value: 180, label: '180°', title: 'Retournement' },
 ];
 
+const BROADCAST_STATE_OPTIONS = [
+  { value: 'none', label: 'Aucun', title: 'Aucun macaron' },
+  { value: 'live', label: 'Live', title: 'Afficher le macaron LIVE' },
+  { value: 'replay', label: 'Rediffusion', title: 'Afficher le macaron REDIFFUSION' },
+];
+
 function streamRotation(stream) {
   if (typeof stream.rotation === 'number') return stream.rotation;
   const legacy = { 'landscape-ccw': -90, 'landscape-cw': 90, landscape: -90, portrait: 0 };
   return legacy[stream.orientation] ?? 0;
 }
 
+function streamBroadcastState(stream) {
+  return stream.broadcastState === 'live' || stream.broadcastState === 'replay'
+    ? stream.broadcastState
+    : 'none';
+}
+
 function RotationPicker({ value, onChange }) {
   return (
     <div className="orientation-toggle">
       {ROTATION_OPTIONS.map((opt) => (
+        <button
+          key={opt.value}
+          className={`orient-btn${value === opt.value ? ' active' : ''}`}
+          onClick={() => onChange(opt.value)}
+          title={opt.title}
+          type="button"
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function BroadcastStatePicker({ value, onChange }) {
+  return (
+    <div className="orientation-toggle">
+      {BROADCAST_STATE_OPTIONS.map((opt) => (
         <button
           key={opt.value}
           className={`orient-btn${value === opt.value ? ' active' : ''}`}
@@ -49,6 +79,7 @@ export default function AdminStreamsPage() {
     label: '',
     input: '',
     rotation: 0,
+    broadcastState: 'none',
   });
 
   useEffect(() => subscribeStreams(setStreams), []);
@@ -61,6 +92,7 @@ export default function AdminStreamsPage() {
       label: '',
       input: '',
       rotation: 0,
+      broadcastState: 'none',
     });
     setError('');
   };
@@ -73,6 +105,7 @@ export default function AdminStreamsPage() {
       label: '',
       input: '',
       rotation: 0,
+      broadcastState: 'none',
     });
     setError('');
     setFeedback('');
@@ -86,6 +119,7 @@ export default function AdminStreamsPage() {
       label: stream.label || '',
       input: stream.videoUrl || '',
       rotation: streamRotation(stream),
+      broadcastState: streamBroadcastState(stream),
     });
     setError('');
     setFeedback('');
@@ -137,6 +171,7 @@ export default function AdminStreamsPage() {
         rotation: dialogState.rotation,
         originalWidth: parsed.originalWidth,
         originalHeight: parsed.originalHeight,
+        broadcastState: dialogState.broadcastState,
       } : stream));
       log.info('updating admin stream', { streamId: dialogState.streamId });
       await persistStreams(nextStreams, `Flux mis à jour : ${label}.`, `save:${dialogState.streamId}`);
@@ -152,6 +187,7 @@ export default function AdminStreamsPage() {
       rotation: dialogState.rotation,
       originalWidth: parsed.originalWidth,
       originalHeight: parsed.originalHeight,
+      broadcastState: dialogState.broadcastState,
     };
     log.info('creating admin stream', { label });
     await persistStreams([...streams, nextStream], `Flux ajouté : ${label}.`, 'create-stream');
@@ -198,7 +234,10 @@ export default function AdminStreamsPage() {
                 <div className="stream-info">
                   <div className="stream-label-input" style={{ cursor: 'default' }}>{stream.label}</div>
                   <div className="stream-url" title={stream.videoUrl}>{stream.videoUrl}</div>
-                  <div className="admin-subline">Rotation : {streamRotation(stream)}°</div>
+                  <div className="admin-subline">
+                    Rotation : {streamRotation(stream)}°
+                    {streamBroadcastState(stream) !== 'none' ? ` • ${streamBroadcastState(stream) === 'live' ? 'Live' : 'Rediffusion'}` : ''}
+                  </div>
                 </div>
                 <div className="admin-actions">
                   <button
@@ -259,6 +298,12 @@ export default function AdminStreamsPage() {
             <RotationPicker
               value={dialogState.rotation}
               onChange={(value) => setDialogState((prev) => ({ ...prev, rotation: value }))}
+            />
+
+            <label className="form-label">Macaron antenne</label>
+            <BroadcastStatePicker
+              value={dialogState.broadcastState}
+              onChange={(value) => setDialogState((prev) => ({ ...prev, broadcastState: value }))}
             />
 
             {error && <div className="form-error">{error}</div>}
