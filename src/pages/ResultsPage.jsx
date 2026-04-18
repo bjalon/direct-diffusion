@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signInAnonymously } from 'firebase/auth';
-import { auth } from '../firebase';
+import { auth, ensureFirestoreOnline } from '../firebase';
 import { subscribeParticipants } from '../firebase/participants';
 import {
   abandonCurrentCompetitor,
@@ -31,9 +31,11 @@ import { createLogger } from '../utils/logger';
 import { deriveFinishedCourses } from '../utils/resultsDerivation';
 
 const log = createLogger('ResultsPage');
+const RESUME_EVENT_DEBOUNCE_MS = 750;
 
 export default function ResultsPage({ user, onLogout }) {
   const navigate = useNavigate();
+  const resumeVersion = useResultsResumeVersion();
   const [signInState, setSignInState] = useState('idle');
   const [clockState, setClockState] = useState({
     status: 'pending',
@@ -113,12 +115,12 @@ export default function ResultsPage({ user, onLogout }) {
           measuredAtClientMs: null,
         });
       });
-  }, [user?.uid]);
+  }, [user?.uid, resumeVersion]);
 
   useEffect(() => {
     if (!user || user === false) return;
     return subscribeResultAccess(user.uid, setResultAccess);
-  }, [user?.uid]);
+  }, [user?.uid, resumeVersion]);
 
   useEffect(() => {
     if (!user || user === false) return;
@@ -126,7 +128,7 @@ export default function ResultsPage({ user, onLogout }) {
       setResultRequest(request);
       if (request?.email) setRequestEmail(request.email);
     });
-  }, [user?.uid]);
+  }, [user?.uid, resumeVersion]);
 
   const canStart = !!resultAccess?.results_start;
   const canFinish = !!resultAccess?.results_finish;
@@ -154,17 +156,17 @@ export default function ResultsPage({ user, onLogout }) {
   useEffect(() => {
     if (!hasResultAccess) return;
     return subscribeCurrentCompetitor(setCurrentCompetitor);
-  }, [hasResultAccess]);
+  }, [hasResultAccess, resumeVersion]);
 
   useEffect(() => {
     if (!canStart) return;
     return subscribeParticipants(setParticipants);
-  }, [canStart]);
+  }, [canStart, resumeVersion]);
 
   useEffect(() => {
     if (!canStart) return;
     return subscribeResultEvents(setResultEvents);
-  }, [canStart]);
+  }, [canStart, resumeVersion]);
 
   useEffect(() => {
     const unsubs = [];
@@ -175,7 +177,7 @@ export default function ResultsPage({ user, onLogout }) {
       unsubs.push(subscribeStation('finish', (doc) => setStationDocs((prev) => ({ ...prev, finish: doc }))));
     }
     return () => unsubs.forEach((unsub) => unsub());
-  }, [canStart, canFinish]);
+  }, [canStart, canFinish, resumeVersion]);
 
   useEffect(() => {
     if (!selectedStation || !actor || !hasResultAccess) return;
@@ -1180,6 +1182,52 @@ function ResultsErrorCard({ title, message, onLogout, actions }) {
 
 function primaryProvider(user) {
   return user?.providerData?.[0]?.providerId || 'anonymous';
+}
+
+function useResultsResumeVersion() {
+  const [resumeVersion, setResumeVersion] = useState(0);
+  const lastResumeAtRef = useRef(0);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined;
+
+    const handleResume = (reason) => {
+      if (document.visibilityState === 'hidden') return;
+
+      const now = Date.now();
+      if (now - lastResumeAtRef.current < RESUME_EVENT_DEBOUNCE_MS) return;
+      lastResumeAtRef.current = now;
+
+      log.info('results page resumed; refreshing firestore listeners', { reason, resumedAtMs: now });
+      ensureFirestoreOnline().catch((error) => {
+        log.warn('failed to ensure firestore network after resume', { reason, error });
+      });
+      setResumeVersion((value) => value + 1);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        handleResume('visibilitychange');
+      }
+    };
+    const handleFocus = () => handleResume('focus');
+    const handleOnline = () => handleResume('online');
+    const handlePageShow = (event) => handleResume(event.persisted ? 'pageshow-persisted' : 'pageshow');
+
+    window.addEventListener('pageshow', handlePageShow);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('pageshow', handlePageShow);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  return resumeVersion;
 }
 
 function statusLabel(status) {
