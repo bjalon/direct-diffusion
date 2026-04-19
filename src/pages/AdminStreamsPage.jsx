@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useEventContext } from '../context/EventContext';
 import { subscribeStreams, saveStreams } from '../firebase/streams';
 import { parseInput } from '../utils/iframeParser';
 import { createLogger } from '../utils/logger';
@@ -68,6 +69,7 @@ function BroadcastStatePicker({ value, onChange }) {
 }
 
 export default function AdminStreamsPage() {
+  const { event } = useEventContext();
   const [streams, setStreams] = useState([]);
   const [busyKey, setBusyKey] = useState('');
   const [feedback, setFeedback] = useState('');
@@ -82,7 +84,7 @@ export default function AdminStreamsPage() {
     broadcastState: 'none',
   });
 
-  useEffect(() => subscribeStreams(setStreams), []);
+  useEffect(() => subscribeStreams(event.id, setStreams), [event.id]);
 
   const closeDialog = () => {
     setDialogState({
@@ -144,7 +146,7 @@ export default function AdminStreamsPage() {
     setFeedback('');
     setError('');
     try {
-      await saveStreams(nextStreams);
+      await saveStreams(event.id, nextStreams);
       setFeedback(successMessage);
     } catch (err) {
       setError(getErrorLabel(err));

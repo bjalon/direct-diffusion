@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
+import { useEventContext } from '../../context/EventContext';
 import { subscribeResultEvents } from '../../firebase/results';
 import { deriveGeneralRanking } from '../../utils/resultsDerivation';
 
 const MEDALS = ['#f5c518', '#b8c0cc', '#cd7f32'];
 
 export default function ClassementDisplay() {
+  const { event } = useEventContext();
   const [classement, setClassement] = useState([]);
 
   useEffect(() => {
-    return subscribeResultEvents((events) => setClassement(deriveGeneralRanking(events)));
-  }, []);
+    return subscribeResultEvents(event.id, (events) => setClassement(deriveGeneralRanking(events)));
+  }, [event.id]);
 
   return (
     <div className="vd-root">

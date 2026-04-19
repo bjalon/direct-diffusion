@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEventContext } from '../../context/EventContext';
 import { subscribeCurrentCompetitor, subscribeResultEvents, subscribeStation } from '../../firebase/results';
 import { deriveFinishedCourses, deriveGeneralRanking } from '../../utils/resultsDerivation';
 
@@ -19,6 +20,7 @@ export default function ResultsRotationDisplay({
   scrollSpeed = 28,
   endPause = 4,
 }) {
+  const { event } = useEventContext();
   const [events, setEvents] = useState([]);
   const [currentCompetitor, setCurrentCompetitor] = useState(null);
   const [startStation, setStartStation] = useState(null);
@@ -31,9 +33,9 @@ export default function ResultsRotationDisplay({
   const viewportRef = useRef(null);
   const listRef = useRef(null);
 
-  useEffect(() => subscribeResultEvents(setEvents), []);
-  useEffect(() => subscribeCurrentCompetitor(setCurrentCompetitor), []);
-  useEffect(() => subscribeStation('start', setStartStation), []);
+  useEffect(() => subscribeResultEvents(event.id, setEvents), [event.id]);
+  useEffect(() => subscribeCurrentCompetitor(event.id, setCurrentCompetitor), [event.id]);
+  useEffect(() => subscribeStation(event.id, 'start', setStartStation), [event.id]);
 
   const courses = useMemo(() => deriveFinishedCourses(events), [events]);
   const ranking = useMemo(() => deriveGeneralRanking(events), [events]);

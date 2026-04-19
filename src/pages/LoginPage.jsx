@@ -2,29 +2,31 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GoogleAuthProvider, signInAnonymously, signInWithPopup } from 'firebase/auth';
 import AnonymousAccountList from '../components/AnonymousAccountList';
+import { useEventContext } from '../context/EventContext';
 import { auth } from '../firebase';
 import { submitResultAccessRequest } from '../firebase/results';
 import { createLogger } from '../utils/logger';
 import { forgetAnonymousAccount, listAnonymousAccounts, restoreAnonymousAccount } from '../utils/anonymousAccounts';
-import { ROUTES } from '../utils/routes';
+import { buildEventRoute } from '../utils/routes';
 
 const googleProvider = new GoogleAuthProvider();
 const log = createLogger('LoginPage');
 
 export default function LoginPage({ user, deviceAccess, deviceRequest }) {
+  const { event } = useEventContext();
   const navigate = useNavigate();
   const [status, setStatus] = useState('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [requestEmail, setRequestEmail] = useState('');
   const [requestStatus, setRequestStatus] = useState('idle');
   const [requestError, setRequestError] = useState('');
-  const [knownAccounts, setKnownAccounts] = useState(() => listAnonymousAccounts(auth));
+  const [knownAccounts, setKnownAccounts] = useState(() => listAnonymousAccounts(auth, event.id));
   const [resumeUid, setResumeUid] = useState('');
   const [resumeError, setResumeError] = useState('');
 
   useEffect(() => {
-    setKnownAccounts(listAnonymousAccounts(auth));
-  }, [user?.uid, user === false]);
+    setKnownAccounts(listAnonymousAccounts(auth, event.id));
+  }, [event.id, user?.uid, user === false]);
 
   async function handleGoogleSignIn() {
     setStatus('sending');
@@ -57,7 +59,7 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
         isAnonymous: credential.user.isAnonymous,
       });
 
-      await submitResultAccessRequest({
+      await submitResultAccessRequest(event.id, {
         uid: credential.user.uid,
         email: requestEmail.trim().toLowerCase(),
         providerId: 'anonymous',
@@ -82,11 +84,11 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
     setResumeError('');
     try {
       log.info('restoring anonymous account', { uid });
-      await restoreAnonymousAccount(auth, uid);
+      await restoreAnonymousAccount(auth, event.id, uid);
       log.info('anonymous account restored', { uid });
     } catch (err) {
       log.error('anonymous account restore failed', { uid, error: err });
-      setKnownAccounts(listAnonymousAccounts(auth));
+      setKnownAccounts(listAnonymousAccounts(auth, event.id));
       setResumeError('Impossible de reprendre ce compte léger local. Il a été retiré de la liste.');
     } finally {
       setResumeUid('');
@@ -94,8 +96,8 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
   }
 
   function handleDeleteAnonymous(uid) {
-    forgetAnonymousAccount(auth, uid);
-    setKnownAccounts(listAnonymousAccounts(auth));
+    forgetAnonymousAccount(auth, event.id, uid);
+    setKnownAccounts(listAnonymousAccounts(auth, event.id));
     if (resumeUid === uid) {
       setResumeUid('');
     }
@@ -134,7 +136,7 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
           <div className="results-status-card">
             <div className="results-status-line"><strong>Email:</strong> {deviceAccess.email || '—'}</div>
             <div className="results-status-line"><strong>UID:</strong> {user.uid}</div>
-            <button className="btn btn-primary login-btn" onClick={() => navigate(ROUTES.display)}>
+            <button className="btn btn-primary login-btn" onClick={() => navigate(buildEventRoute(event.slug, 'display'))}>
               Aller sur Affichage
             </button>
           </div>

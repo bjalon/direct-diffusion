@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useEventContext } from '../context/EventContext';
 import {
   ADMIN_ROLE_KEYS,
   approveAccessRequest,
@@ -43,6 +44,7 @@ const DEFAULT_NORMAL_ROLES = {
 };
 
 export default function AdminPage({ currentUser }) {
+  const { event } = useEventContext();
   const [allowedUsers, setAllowedUsers] = useState([]);
   const [requests, setRequests] = useState([]);
   const [allowedResultUsers, setAllowedResultUsers] = useState([]);
@@ -54,16 +56,16 @@ export default function AdminPage({ currentUser }) {
   const [feedback, setFeedback] = useState('');
   const [error, setError] = useState('');
 
-  useEffect(() => subscribeAllowedUsers(setAllowedUsers), []);
-  useEffect(() => subscribeAccessRequests(setRequests), []);
-  useEffect(() => subscribeAllowedResultUsers(setAllowedResultUsers), []);
-  useEffect(() => subscribePendingResultAccessRequests(setResultRequests), []);
-  useEffect(() => subscribeCurrentStationAssignment('start', (doc) => {
+  useEffect(() => subscribeAllowedUsers(event.id, setAllowedUsers), [event.id]);
+  useEffect(() => subscribeAccessRequests(event.id, setRequests), [event.id]);
+  useEffect(() => subscribeAllowedResultUsers(event.id, setAllowedResultUsers), [event.id]);
+  useEffect(() => subscribePendingResultAccessRequests(event.id, setResultRequests), [event.id]);
+  useEffect(() => subscribeCurrentStationAssignment(event.id, 'start', (doc) => {
     setStationAssignments((prev) => ({ ...prev, start: doc }));
-  }), []);
-  useEffect(() => subscribeCurrentStationAssignment('finish', (doc) => {
+  }), [event.id]);
+  useEffect(() => subscribeCurrentStationAssignment(event.id, 'finish', (doc) => {
     setStationAssignments((prev) => ({ ...prev, finish: doc }));
-  }), []);
+  }), [event.id]);
 
   const currentEmail = currentUser?.email?.trim().toLowerCase() ?? '';
   const currentUserEntry = useMemo(
@@ -85,7 +87,7 @@ export default function AdminPage({ currentUser }) {
     setBusyKey(`add:${email}`);
     try {
       log.info('adding google user', { email, roles: newRoles });
-      await saveAllowedUser(email, newRoles);
+      await saveAllowedUser(event.id, email, newRoles);
       setNewEmail('');
       setNewRoles(DEFAULT_NORMAL_ROLES);
       setFeedback(`Accès Google ajouté pour ${email}.`);
@@ -110,7 +112,7 @@ export default function AdminPage({ currentUser }) {
     setBusyKey(`role:${email}:${role}`);
     try {
       log.info('toggling google role', { email, role, checked });
-      await saveAllowedUser(email, { ...entry, [role]: checked });
+      await saveAllowedUser(event.id, email, { ...entry, [role]: checked });
     } catch (err) {
       setError(getErrorLabel(err));
     } finally {
@@ -129,7 +131,7 @@ export default function AdminPage({ currentUser }) {
     setBusyKey(`delete:${email}`);
     try {
       log.info('deleting google user', { email });
-      await deleteAllowedUser(email);
+      await deleteAllowedUser(event.id, email);
       setFeedback(`Accès supprimé pour ${email}.`);
     } catch (err) {
       setError(getErrorLabel(err));
@@ -143,7 +145,7 @@ export default function AdminPage({ currentUser }) {
     setBusyKey(`approve:${email}`);
     try {
       log.info('approving google access request', { email });
-      await approveAccessRequest(email, DEFAULT_NORMAL_ROLES);
+      await approveAccessRequest(event.id, email, DEFAULT_NORMAL_ROLES);
       setFeedback(`Demande Google approuvée pour ${email}.`);
     } catch (err) {
       setError(getErrorLabel(err));
@@ -157,7 +159,7 @@ export default function AdminPage({ currentUser }) {
     setBusyKey(`reject:${email}`);
     try {
       log.info('rejecting google access request', { email });
-      await rejectAccessRequest(email);
+      await rejectAccessRequest(event.id, email);
       setFeedback(`Demande Google refusée pour ${email}.`);
     } catch (err) {
       setError(getErrorLabel(err));
@@ -171,7 +173,7 @@ export default function AdminPage({ currentUser }) {
     setBusyKey(`result-approve:${uid}`);
     try {
       log.info('approving results access request', { uid });
-      await approveResultAccessRequest(uid);
+      await approveResultAccessRequest(event.id, uid);
       setFeedback(`Demande résultats approuvée pour ${uid}.`);
     } catch (err) {
       setError(getErrorLabel(err));
@@ -185,7 +187,7 @@ export default function AdminPage({ currentUser }) {
     setBusyKey(`result-reject:${uid}`);
     try {
       log.info('rejecting results access request', { uid });
-      await rejectResultAccessRequest(uid);
+      await rejectResultAccessRequest(event.id, uid);
       setFeedback(`Demande résultats refusée pour ${uid}.`);
     } catch (err) {
       setError(getErrorLabel(err));
@@ -214,7 +216,7 @@ export default function AdminPage({ currentUser }) {
     setBusyKey(`result-role:${uid}:${role}`);
     try {
       log.info('toggling result role', { uid, role, checked });
-      await saveAllowedResultUser(uid, nextRoles);
+      await saveAllowedResultUser(event.id, uid, nextRoles);
       setFeedback(`Droits légers mis à jour pour ${entry.email || uid}.`);
     } catch (err) {
       setError(getErrorLabel(err));
@@ -228,7 +230,7 @@ export default function AdminPage({ currentUser }) {
     setBusyKey(`result-delete:${uid}`);
     try {
       log.info('deleting result operator', { uid });
-      await deleteAllowedResultUser(uid);
+      await deleteAllowedResultUser(event.id, uid);
       setFeedback(`Accès résultats supprimé pour ${uid}.`);
     } catch (err) {
       setError(getErrorLabel(err));
@@ -242,7 +244,7 @@ export default function AdminPage({ currentUser }) {
     setBusyKey(`release-station:${station}`);
     try {
       log.info('releasing station as admin', { station });
-      await releaseStationAsAdmin(station);
+      await releaseStationAsAdmin(event.id, station);
       setFeedback(`Poste ${station === 'start' ? 'départ' : 'arrivée'} libéré.`);
     } catch (err) {
       setError(getErrorLabel(err));
@@ -257,8 +259,10 @@ export default function AdminPage({ currentUser }) {
       <section className="config-section">
         <h2 className="section-title">Administration</h2>
         <p className="hint">
-          Les accès Google sensibles sont gérés dans <code>allowedUsers</code>. Les opérateurs
-          résultats et TV non-OAuth sont gérés par <code>uid</code> dans <code>allowedResultUsers</code>.
+          Les accès Google de cet événement sont gérés dans <code>events/{event.id}/allowedUsers</code>.
+          {' '}
+          Les opérateurs résultats et TV non-OAuth sont gérés par <code>uid</code> dans{' '}
+          <code>events/{event.id}/allowedResultUsers</code>.
         </p>
         {currentUserEntry && (
           <div className="admin-banner">

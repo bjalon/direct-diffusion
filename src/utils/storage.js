@@ -157,7 +157,7 @@ export const BUILTIN_LAYOUTS = {
   }),
 };
 
-const STORAGE_KEY = 'direct-diffusion-config';
+const STORAGE_KEY_PREFIX = 'direct-diffusion-config';
 const CUSTOM_LAYOUTS_KEY = 'direct-diffusion-custom-layouts';
 const DEFAULT_DISPLAY_CONFIGURATION_ID = 'default';
 const DEFAULT_DISPLAY_CONFIGURATION_NAME = 'Configuration 1';
@@ -309,9 +309,13 @@ export function normalizeConfigState(raw) {
   );
 }
 
-export function loadConfig() {
+function eventStorageKey(eventId = 'global') {
+  return `${STORAGE_KEY_PREFIX}:${eventId || 'global'}`;
+}
+
+export function loadConfig(eventId) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(eventStorageKey(eventId));
     if (!raw) return normalizeConfigState(null);
     return normalizeConfigState(JSON.parse(raw));
   } catch {
@@ -319,7 +323,7 @@ export function loadConfig() {
   }
 }
 
-export function saveConfig(config) {
+export function saveConfig(config, eventId) {
   const normalizedConfig = normalizeConfigState(config);
   const persistedConfigurations = Object.fromEntries(
     Object.entries(normalizedConfig.configurations).map(([id, value]) => [
@@ -337,7 +341,7 @@ export function saveConfig(config) {
   );
 
   localStorage.setItem(
-    STORAGE_KEY,
+    eventStorageKey(eventId),
     JSON.stringify({
       activeConfigurationId: normalizedConfig.activeConfigurationId,
       configurations: persistedConfigurations,

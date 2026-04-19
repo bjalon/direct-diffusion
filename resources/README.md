@@ -1,22 +1,96 @@
-# Firebase Environments And GitHub Setup
+# Firebase, Multi-evenement Et GitHub
 
-Ce document décrit la mise en place complète des environnements Firebase utilisés par ce dépôt :
+Ce document decrit la mise en place complete du projet avec :
 
-- `prod` : projet utilisé par GitHub Pages
-- `integration` : projet dédié aux tests d'intégration
-- `dev` : projet dédié aux développeurs
+- `prod` : projet Firebase utilise par GitHub Pages
+- `integration` : projet Firebase dedie aux tests d'integration
+- `dev` : projet Firebase dedie aux developpeurs
 
-La source de vérité des règles Firestore est :
+La source de verite des regles Firestore est :
 
 - [firestore.rules](/home/bjalon/projects/direct-diffusion/resources/firestore.rules)
 
-Les alias Firebase CLI du dépôt sont définis dans :
+Les alias Firebase CLI du depot sont definis dans :
 
 - [.firebaserc](/home/bjalon/projects/direct-diffusion/.firebaserc)
 
-## 1. Projets Firebase à créer
+## 1. Modele de donnees
 
-Le dépôt est actuellement configuré pour utiliser les aliases suivants :
+L'application n'est plus mono-evenement.
+
+Le modele cible est :
+
+```text
+allowedUsers/{email}
+events/{eventId}
+events/{eventId}/allowedUsers/{email}
+events/{eventId}/accessRequests/{email}
+events/{eventId}/allowedResultUsers/{uid}
+events/{eventId}/resultAccessRequests/{uid}
+events/{eventId}/participants/{participantId}
+events/{eventId}/currentStations/{currentStart|currentFinish}
+events/{eventId}/resultStations/{start|finish}
+events/{eventId}/currentCompetitor/current
+events/{eventId}/resultEvents/{clickId}
+events/{eventId}/resultRuns/{runId}
+events/{eventId}/clockChecks/{uid}
+events/{eventId}/config/streams
+```
+
+Principes :
+
+- `allowedUsers` contient les droits globaux de l'application
+- le role global `admin_events` donne acces a l'administration protegee des evenements
+- `events/{eventId}` est la racine d'un evenement
+- les droits Google sont scopes par evenement dans `events/{eventId}/allowedUsers`
+- les comptes legers TV / chrono sont scopes par evenement dans `events/{eventId}/allowedResultUsers`
+- un meme utilisateur Google peut etre autorise sur plusieurs evenements differents
+- les comptes legers memorises dans le navigateur sont conserves localement par `projectId + eventId`
+
+Le document `events/{eventId}` contient au minimum :
+
+```json
+{
+  "slug": "caisse-a-savon-2026",
+  "title": "Caisse a savon 2026",
+  "type": "soapbox",
+  "createdAt": "...",
+  "updatedAt": "...",
+  "promotionStartsAt": "...",
+  "startsAt": "...",
+  "endsAt": null,
+  "published": true
+}
+```
+
+Valeurs actuelles de `type` :
+
+- `soapbox`
+- `football`
+- `handball`
+
+## 2. URLs de l'application
+
+La home publique liste les evenements promus :
+
+- `#/`
+
+Toutes les vues d'un evenement passent par son slug :
+
+- `#/events/:eventSlug/tv/affichage`
+- `#/events/:eventSlug/tv/flow`
+- `#/events/:eventSlug/tv/flow-admin`
+- `#/events/:eventSlug/tv/layouts`
+- `#/events/:eventSlug/tv/participants`
+- `#/events/:eventSlug/tv/resultats`
+- `#/events/:eventSlug/tv/runs`
+- `#/events/:eventSlug/tv/admin`
+- `#/events/:eventSlug/tv/archives`
+- `#/events/:eventSlug/chrono`
+
+## 3. Projets Firebase a creer
+
+Le depot est configure pour utiliser :
 
 ```json
 {
@@ -28,42 +102,42 @@ Le dépôt est actuellement configuré pour utiliser les aliases suivants :
 }
 ```
 
-Si un identifiant change, mettre à jour :
+Si un identifiant change, mettre a jour :
 
-- [`.firebaserc`](/home/bjalon/projects/direct-diffusion/.firebaserc)
-- les variables `VITE_FIREBASE_*` utilisées localement et en CI
+- [.firebaserc](/home/bjalon/projects/direct-diffusion/.firebaserc)
+- les variables `VITE_FIREBASE_*`
 
-### 1.1 Initialiser un projet Firebase pour cette application
+## 4. Initialiser un projet Firebase
 
-Pour cette application, il n'y a pas de `firebase init` à lancer dans le repo :
+Il n'y a pas de `firebase init` a lancer dans ce repo :
 
-- [firebase.json](/home/bjalon/projects/direct-diffusion/firebase.json) existe déjà
-- [.firebaserc](/home/bjalon/projects/direct-diffusion/.firebaserc) existe déjà
-- les règles Firestore sont déjà versionnées dans [firestore.rules](/home/bjalon/projects/direct-diffusion/resources/firestore.rules)
+- [firebase.json](/home/bjalon/projects/direct-diffusion/firebase.json) existe deja
+- [.firebaserc](/home/bjalon/projects/direct-diffusion/.firebaserc) existe deja
+- les regles Firestore sont deja versionnees
 
-La bonne approche est donc :
+La bonne sequence est :
 
-1. créer ou ouvrir le projet dans Firebase Console
-2. créer l'application Web Firebase de ce projet
-3. récupérer la configuration Web `VITE_FIREBASE_*`
-4. activer Firestore et Authentication
-5. déployer les règles du repo avec `npm run rules:deploy:<env>`
-6. créer le premier administrateur dans `allowedUsers`
+1. creer le projet Firebase
+2. creer l'application Web Firebase
+3. activer Firestore et Authentication
+4. recuperer la configuration Web
+5. deployer les regles du repo
+6. creer le premier `allowedUsers/{email}` avec `admin_events`
+7. se connecter
+8. ouvrir l'administration des evenements
+9. creer le premier evenement
 
-### 1.2 Séquence exacte dans Firebase Console
+### 4.1 Configuration dans Firebase Console
 
 Pour un nouveau projet Firebase :
 
-1. créer le projet dans Firebase Console
+1. creer le projet dans Firebase Console
 2. Google Analytics :
    - optionnel pour cette application
-   - tu peux le laisser désactivé si tu n'en as pas besoin
-3. dans `Paramètres du projet` > `Général` > `Vos applications`
-   - créer une application `Web`
-   - nom conseillé : `direct-diffusion-dev`, `direct-diffusion-integration` ou `direct-diffusion-prod`
-   - ne pas activer Firebase Hosting pour cette app
-     - l'application est publiée via GitHub Pages, pas via Firebase Hosting
-4. copier la configuration Web affichée
+3. dans `Parametres du projet > General > Vos applications`
+   - creer une application `Web`
+   - ne pas activer Firebase Hosting
+4. recuperer :
    - `apiKey`
    - `authDomain`
    - `projectId`
@@ -71,65 +145,40 @@ Pour un nouveau projet Firebase :
    - `messagingSenderId`
    - `appId`
 5. dans `Firestore Database`
-   - créer la base en mode natif
-   - choisir la région
-   - garder la même stratégie de région entre `dev`, `integration` et `prod` si possible
-6. choix du mode Firestore au moment de la création :
-   - pour `dev` et `integration`, le plus simple est de partir en `mode test`, puis de déployer immédiatement les règles du repo
-   - pour `prod`, tu peux partir en `mode production` si tu veux verrouiller tout de suite, mais il faudra alors déployer les règles et créer le premier admin avant usage
-   - dans tous les cas, les règles de référence de ce projet sont celles du repo, pas celles générées par l'assistant Firebase
-7. dans `Authentication` > `Méthode de connexion`
+   - creer la base en mode natif
+   - pour `dev` et `integration`, partir en `mode test` puis deployer immediatement les vraies regles du repo
+   - pour `prod`, `mode production` ou `mode test` sont possibles, mais les regles du repo doivent etre deployees avant usage
+6. dans `Authentication > Methode de connexion`
    - activer `Google`
-   - si Firebase demande un email de support du projet, choisir l'email adapté
-   - dans `Ajoutez à la liste d'autorisation les ID client de projets externes (facultatif)`, ne rien mettre pour cette application
-     - cette app utilise le flux Firebase Auth standard côté Web, pas un client OAuth Google externe
-   - les champs `ID client Web` et `Code secret du client Web` n'ont pas à être saisis manuellement pour cette application
-     - Firebase gère le provider Google pour le flux standard utilisé ici
-     - ces champs deviennent utiles surtout si tu mets en place un flux Google manuel ou un client OAuth externe
    - activer `Anonyme`
-8. dans `Authentication` > `Settings` > `Authorized domains`
-   - vérifier que `localhost` est présent
-   - ajouter `127.0.0.1` si tu l'utilises
-   - ajouter aussi le domaine de publication si l'application doit utiliser Google OAuth en production
-9. ensuite revenir dans le repo local :
-   - remplir le bon fichier `.env.*.local`
-   - déployer les règles
-   - créer le premier admin
+   - choisir l'email de support si Firebase le demande
+   - laisser vide `Ajoutez a la liste d'autorisation les ID client de projets externes (facultatif)`
+   - ne rien saisir manuellement dans `ID client Web` ni `Code secret du client Web`
+7. dans `Authentication > Settings > Authorized domains`
+   - verifier `localhost`
+   - ajouter `127.0.0.1` si besoin
+   - ajouter le domaine de publication pour `prod`
 
-### 1.3 Ce qu'il n'est pas nécessaire de configurer
+### 4.2 Ce qu'il n'est pas necessaire de configurer
 
-Pour le fonctionnement actuel de l'application, il n'est pas nécessaire d'initialiser :
+Pour le fonctionnement actuel, il n'est pas necessaire d'activer :
 
 - Firebase Hosting
 - Cloud Functions
-- Firebase Storage
 - Cloud Messaging
+- Firebase Storage
 
-Ces services peuvent rester non configurés tant que le projet n'en a pas besoin.
+### 4.3 `measurementId`
 
-Pour chacun des 3 projets Firebase :
+`measurementId` n'est pas utilise par cette application.
 
-1. Créer le projet dans Firebase Console.
-2. Activer Cloud Firestore en mode natif.
-3. Choisir une région et garder la même stratégie de région entre les environnements si possible.
-4. Activer Firebase Authentication.
-5. Activer au minimum les providers :
-   - `Google`
-   - `Anonyme`
-6. Créer une application Web Firebase.
-7. Récupérer les valeurs de configuration Web :
-   - `apiKey`
-   - `authDomain`
-   - `projectId`
-   - `storageBucket`
-   - `messagingSenderId`
-   - `appId`
+Il peut etre ignore car le front n'initialise pas Google Analytics.
 
-## 2. Configuration front par environnement
+## 5. Variables d'environnement Vite
 
-L'application lit Firebase via [src/firebase.js](/home/bjalon/projects/direct-diffusion/src/firebase.js).
+Le front lit Firebase depuis [src/firebase.js](/home/bjalon/projects/direct-diffusion/src/firebase.js).
 
-Les variables attendues sont :
+Variables attendues :
 
 ```bash
 VITE_DEFAULT_LAYOUT=2x2
@@ -141,41 +190,23 @@ VITE_FIREBASE_MESSAGING_SENDER_ID=...
 VITE_FIREBASE_APP_ID=...
 ```
 
-Le dépôt fournit aussi un gabarit :
+Le depot fournit :
 
 - [.env.example](/home/bjalon/projects/direct-diffusion/.env.example)
 
-Les scripts disponibles sont :
+Fichiers locaux recommandes :
+
+- `.env.development.local` pour `qdd-dev`
+- `.env.integration.local` pour `qdd-integration`
+
+Scripts utiles :
 
 - `npm run dev`
-  - lance Vite en mode `development`
-  - doit viser `qdd-dev`
 - `npm run dev:integration`
-  - lance Vite en mode `integration`
-  - doit viser `qdd-integration`
 - `npm run build`
-  - build production
 - `npm run build:integration`
-  - build avec la config `integration`
 
-Le dépôt ignore désormais :
-
-- `.env`
-- `.env.local`
-- `.env.*.local`
-
-La pratique recommandée est donc :
-
-- garder éventuellement `.env` pour une base commune non sensible
-- mettre les vraies configurations locales dans des fichiers par mode
-
-### 2.1 Configuration locale `dev`
-
-Créer :
-
-- `.env.development.local`
-
-Exemple pour travailler localement sur le projet `dev` :
+Exemple `qdd-dev` :
 
 ```bash
 VITE_DEFAULT_LAYOUT=2x2
@@ -187,177 +218,21 @@ VITE_FIREBASE_MESSAGING_SENDER_ID=...
 VITE_FIREBASE_APP_ID=...
 ```
 
-Puis lancer :
+Ensuite :
 
 ```bash
 npm run dev
 ```
 
-### 2.2 Configuration locale `integration`
+## 6. Deploiement des regles Firestore
 
-Créer :
-
-- `.env.integration.local`
-
-Exemple :
-
-```bash
-VITE_DEFAULT_LAYOUT=2x2
-VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=...
-VITE_FIREBASE_PROJECT_ID=qdd-integration
-VITE_FIREBASE_STORAGE_BUCKET=...
-VITE_FIREBASE_MESSAGING_SENDER_ID=...
-VITE_FIREBASE_APP_ID=...
-```
-
-Puis lancer :
-
-```bash
-npm run dev:integration
-```
-
-### 2.3 Priorité des fichiers `.env` avec Vite
-
-Pour mémoire, Vite charge les fichiers par mode. Dans ce dépôt, les plus utiles sont :
-
-- `.env`
-- `.env.local`
-- `.env.development.local`
-- `.env.integration.local`
-
-Pour un poste de développeur, le plus sûr est :
-
-- ne pas mettre la prod dans `.env`
-- mettre `qdd-dev` dans `.env.development.local`
-- mettre `qdd-integration` dans `.env.integration.local`
-
-Comme ça, `npm run dev` ne peut pas tomber par erreur sur la prod.
-
-## 3. Checklist exacte pour le projet `qdd-dev`
-
-Pour que ton poste local utilise `qdd-dev`, il faut faire ces actions dans le projet Firebase `qdd-dev`.
-
-### 3.1 Ce qu'il faut récupérer dans Firebase Console
-
-Dans Firebase Console :
-
-1. ouvrir le projet `qdd-dev`
-2. aller dans `Paramètres du projet`
-3. onglet `Général`
-4. section `Vos applications`
-5. créer une application Web si elle n'existe pas déjà
-6. récupérer la configuration Web
-
-Les valeurs à recopier dans `.env.development.local` sont exactement :
-
-- `apiKey`
-- `authDomain`
-- `projectId`
-- `storageBucket`
-- `messagingSenderId`
-- `appId`
-
-Ce sont ces 6 valeurs qui doivent venir du projet `qdd-dev`.
-
-Important :
-
-- ne pas copier uniquement `projectId`
-- toutes les valeurs doivent venir de la même application Web `qdd-dev`
-
-### 3.2 Ce qu'il faut activer dans `qdd-dev`
-
-Dans le projet `qdd-dev`, vérifier :
-
-1. `Firestore Database`
-   - créer la base en mode natif si elle n'existe pas
-2. `Authentication`
-   - activer le provider `Google`
-   - si un email de support est demandé, le renseigner
-   - laisser vide `Ajoutez à la liste d'autorisation les ID client de projets externes (facultatif)`
-   - ne pas renseigner manuellement `ID client Web` ni `Code secret du client Web` pour cette application
-   - activer le provider `Anonyme`
-   - dans `Settings` > `Authorized domains`, vérifier que `localhost` est présent
-   - si tu utilises un autre hostname local, l'ajouter aussi
-3. application Web
-   - récupérer la config listée ci-dessus
-
-### 3.3 Ce qu'il faut faire dans le repo local
-
-1. créer ou mettre à jour `.env.development.local`
-2. y coller les valeurs du projet `qdd-dev`
-3. lancer :
-
-```bash
-npm run dev
-```
-
-### 3.4 Ce qu'il faut déployer sur `qdd-dev`
-
-Les règles Firestore ne sont pas partagées automatiquement entre projets.
-
-Après avoir créé `qdd-dev`, lancer :
-
-```bash
-npm run rules:deploy:dev
-```
-
-## 4. Bootstrap du premier administrateur sur `qdd-dev`
-
-Avant d'utiliser réellement l'interface d'administration sur `qdd-dev`, il faut créer le premier admin.
-
-Dans Firestore Console du projet `qdd-dev` :
-
-1. créer la collection `allowedUsers`
-2. créer un document dont l'ID est ton email Google en minuscules
-3. mettre au minimum :
-
-```json
-{
-  "email": "prenom.nom@example.com",
-  "administration": true,
-  "admin_flux": true,
-  "participants": true
-}
-```
-
-Sans ce document, tu pourras te connecter avec Google mais pas accéder aux vues admin.
-
-Important :
-
-- l'ID du document et le champ `email` doivent correspondre exactement à l'email Google utilisé pour se connecter
-- en pratique, pour un premier admin `bjalon@qastia.com`, il faut créer :
-  - collection `allowedUsers`
-  - document ID `bjalon@qastia.com`
-- une faute de frappe dans l'email ou un domaine incorrect empêcheront l'autorisation dans l'application
-
-## 5. Déploiement des règles Firestore
-
-Le dépôt expose déjà ces scripts :
+Scripts disponibles dans [package.json](/home/bjalon/projects/direct-diffusion/package.json) :
 
 - `npm run rules:deploy:prod`
 - `npm run rules:deploy:integration`
 - `npm run rules:deploy:dev`
 
-Ils pointent tous vers [firebase.json](/home/bjalon/projects/direct-diffusion/firebase.json), qui référence :
-
-- [resources/firestore.rules](/home/bjalon/projects/direct-diffusion/resources/firestore.rules)
-
-Pré-requis local :
-
-1. Installer Firebase CLI :
-
-```bash
-npm install -g firebase-tools
-```
-
-2. Se connecter :
-
-```bash
-firebase login
-```
-
-3. Déployer selon l'environnement :
+Exemples :
 
 ```bash
 npm run rules:deploy:dev
@@ -365,238 +240,241 @@ npm run rules:deploy:integration
 npm run rules:deploy:prod
 ```
 
-## 6. Bootstrap du premier administrateur
+## 7. Bootstrap du premier administrateur global
 
-L'application protège l'administration via la collection :
+Le premier administrateur global doit etre cree manuellement dans Firestore Console.
 
-- `allowedUsers/{email}`
+Collection :
 
-Les rôles applicatifs Google sont :
+- `allowedUsers`
+
+Document ID :
+
+- l'email Google exact en minuscules
+
+Exemple :
+
+```text
+allowedUsers/bjalon@qastia.com
+```
+
+Contenu minimal :
+
+```json
+{
+  "email": "bjalon@qastia.com",
+  "admin_events": true
+}
+```
+
+Important :
+
+- l'ID du document doit correspondre exactement a l'email Google
+- une faute de frappe sur le domaine bloque l'autorisation
+- ce document donne acces a la vue protegee d'administration des evenements
+
+## 8. Creer le premier evenement
+
+Une fois connecte avec un utilisateur present dans `allowedUsers/{email}` avec `admin_events: true` :
+
+1. ouvrir la home `#/`
+2. se connecter avec Google
+3. utiliser le bouton discret `Administration`
+4. creer l'evenement
+
+Champs importants :
+
+- `title`
+- `slug`
+- `type`
+- `promotionStartsAt`
+- `startsAt`
+- `endsAt`
+- `published`
+
+Notes :
+
+- le `slug` devient l'ID Firestore de l'evenement
+- il est donc fixe apres creation
+- `promotionStartsAt` est utilise pour l'affichage public sur la home
+
+## 9. Gerer les droits d'un evenement
+
+Une fois l'evenement cree :
+
+1. ouvrir l'evenement
+2. aller dans `Admin`
+3. gerer :
+   - `allowedUsers`
+   - `accessRequests`
+   - `allowedResultUsers`
+   - `resultAccessRequests`
+
+Les roles Google evenements sont stockes dans :
+
+- `events/{eventId}/allowedUsers/{email}`
+
+Champs utiles :
 
 - `administration`
 - `admin_flux`
 - `participants`
 
-Le premier compte administrateur doit être créé manuellement dans Firestore Console du projet concerné.
+Les droits legers TV / chrono sont stockes dans :
 
-Document à créer :
+- `events/{eventId}/allowedResultUsers/{uid}`
 
-- collection : `allowedUsers`
-- document ID : email Google en minuscules
+Champs utiles :
 
-Exemple :
+- `tv`
+- `results_start`
+- `results_finish`
 
-```json
-{
-  "email": "prenom.nom@example.com",
-  "administration": true,
-  "admin_flux": true,
-  "participants": true
-}
-```
+## 10. Comportement des comptes legers
 
-Notes :
+Les comptes non-OAuth sont memorises localement pour permettre une reprise ulterieure sur le meme evenement.
 
-- Firestore Console utilise les permissions IAM du projet, pas les règles du client web.
-- Sans ce document, personne ne pourra accéder à la vue `Admin` sans passer par une demande d'accès.
-- Une fois ce premier admin connecté, il peut gérer les autres comptes depuis l'interface.
+Important :
 
-## 7. Bootstrap des opérateurs résultats
+- la memorisation locale n'est pas la reservation du poste
+- au logout, le poste `depart` ou `arrivee` est libere
+- en revanche, le compte leger peut rester dans la liste locale pour etre reutilise plus tard
 
-Les accès non-OAuth pour `start`, `finish` et `tv` sont stockés dans :
+Le scope local utilise :
 
-- `allowedResultUsers/{uid}`
+- le projet Firebase
+- l'application Firebase
+- l'evenement courant
 
-En pratique :
+Donc un compte leger memorise sur un evenement n'apparait pas sur un autre evenement.
 
-- ne pas initialiser cela à la main tant que possible
-- laisser le premier administrateur passer par la vue `Admin`
-- approuver ensuite les demandes générées par les terminaux concernés
+## 11. GitHub Pages
 
-## 8. GitHub Pages
-
-Le workflow de déploiement est :
+La publication GitHub Pages est geree par :
 
 - [.github/workflows/deploy-pages.yml](/home/bjalon/projects/direct-diffusion/.github/workflows/deploy-pages.yml)
 
-Comportement actuel :
+Le workflow se declenche sur :
 
 - `push` sur `main`
-- build Vite
-- déploiement automatique des règles Firestore `prod`
-- déploiement GitHub Pages
+- ou `workflow_dispatch`
 
-Dans GitHub, vérifier :
+Dans GitHub :
 
-1. `Settings` > `Pages`
+1. `Settings > Pages`
 2. `Build and deployment`
-3. `Source` = `GitHub Actions`
+3. laisser GitHub Actions gerer le deploiement
 
-## 9. Secrets GitHub à configurer
+## 12. Secret GitHub pour deployer les regles prod
 
-### 9.1 Secrets de build front
-
-Le job `build` du workflow lit directement :
-
-- `VITE_FIREBASE_API_KEY`
-- `VITE_FIREBASE_AUTH_DOMAIN`
-- `VITE_FIREBASE_PROJECT_ID`
-- `VITE_FIREBASE_STORAGE_BUCKET`
-- `VITE_FIREBASE_MESSAGING_SENDER_ID`
-- `VITE_FIREBASE_APP_ID`
-
-Comme le job `build` n'est pas rattaché à un environment GitHub, ces secrets doivent être :
-
-- soit des `Repository secrets`
-- soit des `Organization secrets`
-
-Ils doivent contenir les valeurs de l'application Web Firebase du projet `prod`.
-
-### 9.2 Secret CI pour déployer les règles `prod`
-
-Le job `deploy-rules` utilise :
+Le workflow utilise un secret :
 
 - `FIREBASE_SERVICE_ACCOUNT_PROD`
 
-Ce secret est idéalement stocké dans l'environment GitHub :
+Ce secret doit contenir le JSON complet d'une cle de compte de service Google Cloud.
 
-- `production`
+### 12.1 Creation du compte de service
 
-Le job `deploy-rules` référence déjà cet environment dans le workflow.
+Dans Google Cloud Console du projet `prod` :
 
-## 10. Compte de service CI pour les règles `prod`
+1. `IAM et administration`
+2. `Comptes de service`
+3. creer un compte de service dedie a GitHub Actions
+4. lui attribuer :
+   - `Administrateur des regles Firebase`
+   - `Lecteur de l'utilisation des services`
+5. ne pas ajouter de condition IAM
+6. `Cles > Ajouter une cle > Creer une cle > JSON`
 
-Créer un compte de service dédié dans Google Cloud du projet `prod`.
+Il est aussi possible d'utiliser le compte `Firebase Admin SDK` existant si tu preferes aller vite.
 
-Nom recommandé :
+### 12.2 Ajout dans GitHub
 
-- `github-actions-prod-rules`
+Dans GitHub :
 
-Rôles IAM recommandés :
-
-- `Administrateur des règles Firebase`
-  - `roles/firebaserules.admin`
-- `Lecteur de l'utilisation des services`
-  - `roles/serviceusage.serviceUsageViewer`
-
-Ne pas utiliser :
-
-- `Firebase Rules System`
-  - `roles/firebaserules.system`
-
-Ce rôle est un rôle système/service-agent, pas le bon rôle pour GitHub Actions.
-
-Configuration recommandée lors de la création :
-
-- pas de condition IAM
-- laisser `Principaux avec accès` vide
-
-Une fois le compte créé :
-
-1. ouvrir le compte de service
-2. onglet `Clés`
-3. `Ajouter une clé`
-4. `Créer une clé`
-5. format `JSON`
-
-Le JSON téléchargé doit être copié dans GitHub comme secret :
-
-- `FIREBASE_SERVICE_ACCOUNT_PROD`
+1. `Settings`
+2. `Secrets and variables`
+3. `Actions`
+4. `New repository secret`
+5. nom : `FIREBASE_SERVICE_ACCOUNT_PROD`
+6. coller le JSON complet
 
 Important :
 
 - ne jamais committer ce JSON
-- supprimer le fichier local après ajout dans GitHub si non nécessaire
-- modifier les rôles du compte de service ne nécessite pas de régénérer la clé JSON
+- apres creation du secret GitHub, supprimer le fichier local si tu n'en as plus besoin
+- si tu modifies seulement les roles IAM du compte de service, il n'est pas necessaire de regenerer la cle
 
-## 9. Vérification après configuration GitHub
+## 13. Checklist exacte pour `qdd-dev`
 
-Après un push sur `main`, vérifier dans `Actions` :
+Pour que `npm run dev` pointe sur `qdd-dev` :
 
-1. job `build`
-2. job `deploy-rules`
-3. job `deploy`
+1. creer le projet Firebase `qdd-dev`
+2. creer l'application Web Firebase
+3. activer Firestore et Auth (`Google` + `Anonyme`)
+4. verifier `localhost` dans les domaines autorises
+5. remplir `.env.development.local` avec la config Web de `qdd-dev`
+6. deployer les regles :
 
-Ordre attendu :
+```bash
+npm run rules:deploy:dev
+```
 
-- `deploy-rules` attend `build`
-- `deploy` attend `build` et `deploy-rules`
+7. creer `allowedUsers/bjalon@qastia.com` avec `admin_events: true` si c'est ton compte admin de dev
+8. lancer :
 
-Donc :
+```bash
+npm run dev
+```
 
-- si les règles échouent, GitHub Pages ne part pas
-- si les règles passent, le site est ensuite publié
+9. ouvrir `#/events-admin`
+10. creer le premier evenement
 
-## 10. Erreurs fréquentes
+## 14. Erreurs frequentes
 
-### Que mettre dans la configuration du fournisseur Google ?
+### 14.1 `Missing or insufficient permissions`
 
-Pour cette application :
+Verifier :
 
-- activer simplement le fournisseur `Google`
-- choisir l'email de support si Firebase le demande
-- laisser vide `Ajoutez à la liste d'autorisation les ID client de projets externes (facultatif)`
-- ne pas saisir manuellement `ID client Web` ni `Code secret du client Web`
+- le bon projet Firebase
+- les regles deployees sur ce projet
+- le bon document `allowedUsers/{email}` avec `admin_events: true` pour le bootstrap global
+- le bon document `events/{eventId}/allowedUsers/{email}` pour l'acces Google a l'evenement
+- le bon document `events/{eventId}/allowedResultUsers/{uid}` pour TV / chrono
 
-Pourquoi :
+### 14.2 `Permission denied to get service [firestore.googleapis.com]`
 
-- l'application utilise Firebase Auth Web avec `GoogleAuthProvider` et `signInWithPopup`
-- elle n'utilise pas ici un flux Google Sign-In manuel avec un client OAuth externe
+Le compte de service GitHub n'a pas assez de droits IAM.
 
-Les champs de client OAuth externe deviennent utiles seulement si tu décides plus tard :
+Il faut au minimum :
 
-- d'utiliser la bibliothèque Google Sign-In directement
-- ou de faire un `signInWithCredential` à partir d'un token obtenu hors du flux Firebase standard
+- `Administrateur des regles Firebase`
+- `Lecteur de l'utilisation des services`
 
-### `Permission denied to get service [firestore.googleapis.com]`
+### 14.3 La home publique ne liste aucun evenement
 
-Cause :
+Verifier :
 
-- le compte de service CI n'a pas la permission `serviceusage.services.get`
+- qu'il existe des documents dans `events`
+- que `published == true`
+- que `promotionStartsAt` est inferieur ou egal a la date courante
 
-Correction :
+### 14.4 Le compte Google se connecte mais n'a pas acces
 
-- ajouter le rôle `Lecteur de l'utilisation des services`
-  - `roles/serviceusage.serviceUsageViewer`
+Verifier :
 
-### Le compte admin ne peut pas accéder à l'application
+- pas de document dans `allowedUsers/{email}` avec `admin_events: true` pour l'administration globale
+- ou pas de document dans `events/{eventId}/allowedUsers/{email}` pour l'evenement
 
-Cause possible :
+## 15. Rappel pratique
 
-- pas de document dans `allowedUsers/{email}`
+Le bootstrap minimal d'un nouvel environnement est :
 
-Correction :
-
-- créer manuellement le document dans Firestore Console
-
-### Les règles ont été changées dans Firebase Console puis écrasées
-
-Cause :
-
-- le workflow CI et les scripts locaux republient toujours [firestore.rules](/home/bjalon/projects/direct-diffusion/resources/firestore.rules)
-
-Correction :
-
-- garder ce fichier comme source de vérité
-- ne pas maintenir une version divergente dans la console
-
-## 11. Checklist rapide
-
-Pour chaque projet Firebase :
-
-- Firestore activé
-- Auth activé
-- provider Google activé
-- provider anonyme activé
-- application Web créée
-- config Web récupérée
-- règles déployées
-- premier admin créé dans `allowedUsers`
-
-Pour GitHub :
-
-- Pages configuré sur `GitHub Actions`
-- secrets `VITE_FIREBASE_*` configurés pour `prod`
-- environment `production` créé
-- secret `FIREBASE_SERVICE_ACCOUNT_PROD` configuré
-- compte de service CI avec les 2 rôles IAM requis
+1. creer le projet Firebase
+2. creer l'application Web
+3. activer Firestore et Auth
+4. remplir `.env.*.local`
+5. deployer les regles
+6. creer le premier `allowedUsers/{email}` avec `admin_events`
+7. lancer l'app
+8. creer les evenements depuis la vue d'administration protegee

@@ -1,8 +1,6 @@
 import {
-  collection,
   deleteField,
   deleteDoc,
-  doc,
   getDoc,
   getDocs,
   onSnapshot,
@@ -17,6 +15,12 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import {
+  eventConfigDoc,
+  eventCurrentCompetitorDoc,
+  eventSubcollection,
+  eventSubdoc,
+} from './eventRefs';
 import { formatDurationMs } from '../utils/resultsBuffer';
 import { createLogger } from '../utils/logger';
 import {
@@ -26,21 +30,22 @@ import {
 } from '../utils/resultArchiveModel';
 import { createSingleFileZip, readSingleFileZip } from '../utils/zipSingleFile';
 
-const RESULT_ACCESS = (uid) => doc(db, 'allowedResultUsers', uid);
-const RESULT_REQUEST = (uid) => doc(db, 'resultAccessRequests', uid);
-const RESULT_STATION = (station) => doc(db, 'resultStations', station);
-const CURRENT_STATION = (station) => doc(
-  db,
+const log = createLogger('firebase/results');
+
+const RESULT_ACCESS = (eventId, uid) => eventSubdoc(eventId, 'allowedResultUsers', uid);
+const RESULT_REQUEST = (eventId, uid) => eventSubdoc(eventId, 'resultAccessRequests', uid);
+const RESULT_STATION = (eventId, station) => eventSubdoc(eventId, 'resultStations', station);
+const CURRENT_STATION = (eventId, station) => eventSubdoc(
+  eventId,
   'currentStations',
   station === 'start' ? 'currentStart' : 'currentFinish',
 );
-const CURRENT_COMPETITOR = doc(db, 'currentCompetitor', 'current');
-const RESULT_EVENT = (eventId) => doc(db, 'resultEvents', eventId);
-const RESULT_RUN = (runId) => doc(db, 'resultRuns', runId);
-const CLOCK_CHECK = (uid) => doc(db, 'clockChecks', uid);
-const PARTICIPANT = (id) => doc(db, 'participants', id);
-const STREAMS_REF = doc(db, 'config', 'streams');
-const log = createLogger('firebase/results');
+const CURRENT_COMPETITOR = (eventId) => eventCurrentCompetitorDoc(eventId);
+const RESULT_EVENT = (eventId, resultEventId) => eventSubdoc(eventId, 'resultEvents', resultEventId);
+const RESULT_RUN = (eventId, runId) => eventSubdoc(eventId, 'resultRuns', runId);
+const CLOCK_CHECK = (eventId, uid) => eventSubdoc(eventId, 'clockChecks', uid);
+const PARTICIPANT = (eventId, id) => eventSubdoc(eventId, 'participants', id);
+const STREAMS_REF = (eventId) => eventConfigDoc(eventId);
 
 function normalizeLightRoles(data) {
   const tv = !!data.tv;
@@ -81,48 +86,48 @@ function createAdminEntityId(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-async function getCourseDocs(collectionName, courseId) {
-  const snap = await getDocs(query(collection(db, collectionName), where('courseId', '==', courseId)));
+async function getCourseDocs(eventId, collectionName, courseId) {
+  const snap = await getDocs(query(eventSubcollection(eventId, collectionName), where('courseId', '==', courseId)));
   return snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
 }
 
-async function getAllDocs(collectionName) {
-  const snap = await getDocs(collection(db, collectionName));
+async function getAllDocs(eventId, collectionName) {
+  const snap = await getDocs(eventSubcollection(eventId, collectionName));
   return snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
 }
 
-export function subscribeResultAccess(uid, onData) {
+export function subscribeResultAccess(eventId, uid, onData) {
   if (!uid) {
     onData(null);
     return () => {};
   }
 
-  return onSnapshot(RESULT_ACCESS(uid), (snap) => {
+  return onSnapshot(RESULT_ACCESS(eventId, uid), (snap) => {
     const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
-    log.debug('result access snapshot', { uid, data });
+    log.debug('result access snapshot', { eventId, uid, data });
     onData(data);
   }, (error) => {
-    log.error('result access subscription failed', { uid, error });
+    log.error('result access subscription failed', { eventId, uid, error });
   });
 }
 
-export function subscribeResultAccessRequest(uid, onData) {
+export function subscribeResultAccessRequest(eventId, uid, onData) {
   if (!uid) {
     onData(null);
     return () => {};
   }
 
-  return onSnapshot(RESULT_REQUEST(uid), (snap) => {
+  return onSnapshot(RESULT_REQUEST(eventId, uid), (snap) => {
     const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
-    log.debug('result access request snapshot', { uid, data });
+    log.debug('result access request snapshot', { eventId, uid, data });
     onData(data);
   }, (error) => {
-    log.error('result access request subscription failed', { uid, error });
+    log.error('result access request subscription failed', { eventId, uid, error });
   });
 }
 
-export function subscribePendingResultAccessRequests(onData) {
-  return onSnapshot(collection(db, 'resultAccessRequests'), (snap) => {
+export function subscribePendingResultAccessRequests(eventId, onData) {
+  return onSnapshot(eventSubcollection(eventId, 'resultAccessRequests'), (snap) => {
     const requests = snap.docs
       .map((entry) => ({ id: entry.id, ...entry.data() }))
       .filter((entry) => entry.status === 'pending')
@@ -131,8 +136,8 @@ export function subscribePendingResultAccessRequests(onData) {
   });
 }
 
-export function subscribeAllowedResultUsers(onData) {
-  return onSnapshot(collection(db, 'allowedResultUsers'), (snap) => {
+export function subscribeAllowedResultUsers(eventId, onData) {
+  return onSnapshot(eventSubcollection(eventId, 'allowedResultUsers'), (snap) => {
     const users = snap.docs
       .map((entry) => ({ id: entry.id, ...entry.data() }))
       .sort((a, b) => (a.email ?? '').localeCompare(b.email ?? '') || a.id.localeCompare(b.id));
@@ -140,25 +145,25 @@ export function subscribeAllowedResultUsers(onData) {
   });
 }
 
-export function subscribeResultEvents(onData) {
+export function subscribeResultEvents(eventId, onData) {
   return onSnapshot(
-    query(collection(db, 'resultEvents'), orderBy('clickedAtClientMs', 'desc')),
+    query(eventSubcollection(eventId, 'resultEvents'), orderBy('clickedAtClientMs', 'desc')),
     (snap) => {
       const events = snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
-      log.debug('resultEvents snapshot', { count: events.length });
+      log.debug('resultEvents snapshot', { eventId, count: events.length });
       onData(events);
     },
     (error) => {
-      log.error('resultEvents subscription failed', error);
+      log.error('resultEvents subscription failed', { eventId, error });
     },
   );
 }
 
-export function submitResultAccessRequest({ uid, email, providerId }) {
+export function submitResultAccessRequest(eventId, { uid, email, providerId }) {
   const normalizedEmail = email.trim().toLowerCase();
-  log.info('submitResultAccessRequest', { uid, email: normalizedEmail, providerId });
+  log.info('submitResultAccessRequest', { eventId, uid, email: normalizedEmail, providerId });
   return setDoc(
-    RESULT_REQUEST(uid),
+    RESULT_REQUEST(eventId, uid),
     {
       uid,
       email: normalizedEmail,
@@ -171,12 +176,12 @@ export function submitResultAccessRequest({ uid, email, providerId }) {
   );
 }
 
-export function approveResultAccessRequest(uid) {
-  log.info('approveResultAccessRequest', { uid });
-  return getDoc(RESULT_REQUEST(uid)).then((snap) => {
+export function approveResultAccessRequest(eventId, uid) {
+  log.info('approveResultAccessRequest', { eventId, uid });
+  return getDoc(RESULT_REQUEST(eventId, uid)).then((snap) => {
     const request = snap.exists() ? snap.data() : {};
     return setDoc(
-      RESULT_ACCESS(uid),
+      RESULT_ACCESS(eventId, uid),
       {
         uid,
         email: (request.email ?? '').trim().toLowerCase(),
@@ -187,7 +192,7 @@ export function approveResultAccessRequest(uid) {
         updatedAt: serverTimestamp(),
       },
       { merge: true },
-    ).then(() => updateDoc(RESULT_REQUEST(uid), {
+    ).then(() => updateDoc(RESULT_REQUEST(eventId, uid), {
       status: 'approved',
       reviewedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -195,20 +200,20 @@ export function approveResultAccessRequest(uid) {
   });
 }
 
-export function rejectResultAccessRequest(uid) {
-  log.info('rejectResultAccessRequest', { uid });
-  return updateDoc(RESULT_REQUEST(uid), {
+export function rejectResultAccessRequest(eventId, uid) {
+  log.info('rejectResultAccessRequest', { eventId, uid });
+  return updateDoc(RESULT_REQUEST(eventId, uid), {
     status: 'rejected',
     reviewedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 }
 
-export function saveAllowedResultUser(uid, data) {
-  log.info('saveAllowedResultUser', { uid, data });
+export function saveAllowedResultUser(eventId, uid, data) {
+  log.info('saveAllowedResultUser', { eventId, uid, data });
   const roles = normalizeLightRoles(data);
   return setDoc(
-    RESULT_ACCESS(uid),
+    RESULT_ACCESS(eventId, uid),
     {
       uid,
       email: (data.email ?? '').trim().toLowerCase(),
@@ -219,47 +224,47 @@ export function saveAllowedResultUser(uid, data) {
   );
 }
 
-export function deleteAllowedResultUser(uid) {
-  log.info('deleteAllowedResultUser', { uid });
-  return deleteDoc(RESULT_ACCESS(uid));
+export function deleteAllowedResultUser(eventId, uid) {
+  log.info('deleteAllowedResultUser', { eventId, uid });
+  return deleteDoc(RESULT_ACCESS(eventId, uid));
 }
 
-export function subscribeStation(station, onData) {
-  return onSnapshot(RESULT_STATION(station), (snap) => {
+export function subscribeStation(eventId, station, onData) {
+  return onSnapshot(RESULT_STATION(eventId, station), (snap) => {
     const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
-    log.debug('station snapshot', { station, data });
+    log.debug('station snapshot', { eventId, station, data });
     onData(data);
   }, (error) => {
-    log.error('station subscription failed', { station, error });
+    log.error('station subscription failed', { eventId, station, error });
   });
 }
 
-export function subscribeCurrentStationAssignment(station, onData, onError) {
-  return onSnapshot(CURRENT_STATION(station), (snap) => {
+export function subscribeCurrentStationAssignment(eventId, station, onData, onError) {
+  return onSnapshot(CURRENT_STATION(eventId, station), (snap) => {
     const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
-    log.debug('current station snapshot', { station, data });
+    log.debug('current station snapshot', { eventId, station, data });
     onData(data);
   }, (error) => {
-    log.error('current station subscription failed', { station, error });
+    log.error('current station subscription failed', { eventId, station, error });
     onError?.(error);
   });
 }
 
-export async function readCurrentStationAssignment(station) {
+export async function readCurrentStationAssignment(eventId, station) {
   try {
-    const snap = await getDoc(CURRENT_STATION(station));
+    const snap = await getDoc(CURRENT_STATION(eventId, station));
     return snap.exists() ? { id: snap.id, ...snap.data() } : null;
   } catch (error) {
     if (error?.code === 'permission-denied') {
-      log.debug('current station read denied', { station });
+      log.debug('current station read denied', { eventId, station });
       return null;
     }
     throw error;
   }
 }
 
-async function assertStationOwned(station, uid) {
-  const snap = await getDoc(CURRENT_STATION(station));
+async function assertStationOwned(eventId, station, uid) {
+  const snap = await getDoc(CURRENT_STATION(eventId, station));
   if (!snap.exists()) {
     throw new Error('station-not-claimed');
   }
@@ -269,10 +274,10 @@ async function assertStationOwned(station, uid) {
   return snap.data();
 }
 
-export async function claimStation(station, actor) {
-  log.info('claimStation start', { station, actor });
+export async function claimStation(eventId, station, actor) {
+  log.info('claimStation start', { eventId, station, actor });
   try {
-    await setDoc(CURRENT_STATION(station), {
+    await setDoc(CURRENT_STATION(eventId, station), {
       station,
       assignedUid: actor.uid,
       assignedEmail: actor.email ?? '',
@@ -288,10 +293,10 @@ export async function claimStation(station, actor) {
   }
 }
 
-export async function setStartStationCourse({ uid, courseId, courseLabel }) {
-  log.info('setStartStationCourse start', { uid, courseId, courseLabel });
+export async function setStartStationCourse(eventId, { uid, courseId, courseLabel }) {
+  log.info('setStartStationCourse start', { eventId, uid, courseId, courseLabel });
   await runTransaction(db, async (transaction) => {
-    const currentStationSnap = await transaction.get(CURRENT_STATION('start'));
+    const currentStationSnap = await transaction.get(CURRENT_STATION(eventId, 'start'));
     if (!currentStationSnap.exists()) {
       throw new Error('station-not-claimed');
     }
@@ -299,8 +304,7 @@ export async function setStartStationCourse({ uid, courseId, courseLabel }) {
       throw new Error('station-not-owned');
     }
 
-    const ref = RESULT_STATION('start');
-    const snap = await transaction.get(ref);
+    const ref = RESULT_STATION(eventId, 'start');
 
     transaction.set(ref, {
       station: 'start',
@@ -312,30 +316,30 @@ export async function setStartStationCourse({ uid, courseId, courseLabel }) {
   });
 }
 
-export async function releaseStation(station, uid) {
-  log.info('releaseStation start', { station, uid });
-  await deleteDoc(CURRENT_STATION(station));
+export async function releaseStation(eventId, station, uid) {
+  log.info('releaseStation start', { eventId, station, uid });
+  await deleteDoc(CURRENT_STATION(eventId, station));
 }
 
-export async function releaseStationAsAdmin(station) {
-  log.info('releaseStationAsAdmin start', { station });
-  const ref = CURRENT_STATION(station);
+export async function releaseStationAsAdmin(eventId, station) {
+  log.info('releaseStationAsAdmin start', { eventId, station });
+  const ref = CURRENT_STATION(eventId, station);
   const snap = await getDoc(ref);
   if (!snap.exists()) return;
   await deleteDoc(ref);
 }
 
-export function subscribeCurrentCompetitor(onData) {
-  return onSnapshot(CURRENT_COMPETITOR, (snap) => {
+export function subscribeCurrentCompetitor(eventId, onData) {
+  return onSnapshot(CURRENT_COMPETITOR(eventId), (snap) => {
     const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
-    log.debug('current competitor snapshot', data);
+    log.debug('current competitor snapshot', { eventId, data });
     onData(data);
   }, (error) => {
-    log.error('current competitor subscription failed', error);
+    log.error('current competitor subscription failed', { eventId, error });
   });
 }
 
-export async function armCurrentCompetitor({
+export async function armCurrentCompetitor(eventId, {
   participant,
   actor,
   runId,
@@ -353,11 +357,12 @@ export async function armCurrentCompetitor({
     courseId,
     courseLabel,
     selectedAtClientMs,
+    eventId,
   });
   const selectedAtClientIso = new Date(selectedAtClientMs).toISOString();
 
   await runTransaction(db, async (transaction) => {
-    const stationSnap = await transaction.get(CURRENT_STATION('start'));
+    const stationSnap = await transaction.get(CURRENT_STATION(eventId, 'start'));
     if (!stationSnap.exists()) {
       throw new Error('station-not-claimed');
     }
@@ -365,12 +370,12 @@ export async function armCurrentCompetitor({
       throw new Error('station-not-owned');
     }
 
-    const currentSnap = await transaction.get(CURRENT_COMPETITOR);
+    const currentSnap = await transaction.get(CURRENT_COMPETITOR(eventId));
     if (currentSnap.exists()) {
       throw new Error('current-competitor-busy');
     }
 
-    transaction.set(CURRENT_COMPETITOR, {
+    transaction.set(CURRENT_COMPETITOR(eventId), {
       runId,
       startId,
       courseId,
@@ -386,7 +391,7 @@ export async function armCurrentCompetitor({
       updatedAt: serverTimestamp(),
     });
 
-    transaction.set(RESULT_RUN(runId), {
+    transaction.set(RESULT_RUN(eventId, runId), {
       runId,
       startId,
       courseId,
@@ -404,10 +409,10 @@ export async function armCurrentCompetitor({
   });
 }
 
-export async function cancelCurrentCompetitor(runId, uid) {
-  log.info('cancelCurrentCompetitor start', { runId, uid });
+export async function cancelCurrentCompetitor(eventId, runId, uid) {
+  log.info('cancelCurrentCompetitor start', { eventId, runId, uid });
   await runTransaction(db, async (transaction) => {
-    const stationSnap = await transaction.get(CURRENT_STATION('start'));
+    const stationSnap = await transaction.get(CURRENT_STATION(eventId, 'start'));
     if (!stationSnap.exists()) {
       throw new Error('station-not-claimed');
     }
@@ -415,7 +420,7 @@ export async function cancelCurrentCompetitor(runId, uid) {
       throw new Error('station-not-owned');
     }
 
-    const snap = await transaction.get(CURRENT_COMPETITOR);
+    const snap = await transaction.get(CURRENT_COMPETITOR(eventId));
     if (!snap.exists()) return;
 
     const current = snap.data();
@@ -423,8 +428,8 @@ export async function cancelCurrentCompetitor(runId, uid) {
       throw new Error('not-current-owner');
     }
 
-    transaction.delete(CURRENT_COMPETITOR);
-    transaction.set(RESULT_RUN(runId), {
+    transaction.delete(CURRENT_COMPETITOR(eventId));
+    transaction.set(RESULT_RUN(eventId, runId), {
       status: 'cancelled',
       cancelledAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -432,21 +437,22 @@ export async function cancelCurrentCompetitor(runId, uid) {
   });
 }
 
-export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
+export async function syncStartBuffer(eventId, { currentCompetitor, clicks, actor }) {
   if (!currentCompetitor?.runId || clicks.length === 0) return null;
   log.info('syncStartBuffer start', {
+    eventId,
     runId: currentCompetitor?.runId,
     clickCount: clicks.length,
     actor,
   });
-  await assertStationOwned('start', actor.uid);
+  await assertStationOwned(eventId, 'start', actor.uid);
 
   const officialStart = clicks[0];
   const batch = writeBatch(db);
   const latestStart = clicks[clicks.length - 1];
 
   clicks.forEach((click) => {
-    batch.set(RESULT_EVENT(click.clickId), {
+    batch.set(RESULT_EVENT(eventId, click.clickId), {
       clickId: click.clickId,
       runId: currentCompetitor.runId,
       startId: currentCompetitor.startId,
@@ -466,7 +472,7 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
     }, { merge: true });
   });
 
-  batch.set(RESULT_RUN(currentCompetitor.runId), {
+  batch.set(RESULT_RUN(eventId, currentCompetitor.runId), {
     status: 'running',
     startId: currentCompetitor.startId,
     courseId: currentCompetitor.courseId,
@@ -487,7 +493,7 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
     updatedAt: serverTimestamp(),
   }, { merge: true });
 
-  batch.set(CURRENT_COMPETITOR, {
+  batch.set(CURRENT_COMPETITOR(eventId), {
     ...currentCompetitor,
     status: 'running',
     officialStartClickId: officialStart.clickId,
@@ -508,12 +514,13 @@ export async function syncStartBuffer({ currentCompetitor, clicks, actor }) {
   return officialStart;
 }
 
-export async function mirrorPendingStartClicks({ currentCompetitor, clicks, actor }) {
+export async function mirrorPendingStartClicks(eventId, { currentCompetitor, clicks, actor }) {
   if (!currentCompetitor?.runId) return;
-  await assertStationOwned('start', actor.uid);
+  await assertStationOwned(eventId, 'start', actor.uid);
   const latestStart = clicks[clicks.length - 1] ?? null;
 
   log.info('mirrorPendingStartClicks', {
+    eventId,
     runId: currentCompetitor.runId,
     clickCount: clicks.length,
     latestStart,
@@ -530,8 +537,8 @@ export async function mirrorPendingStartClicks({ currentCompetitor, clicks, acto
   };
 
   const batch = writeBatch(db);
-  batch.set(CURRENT_COMPETITOR, payload, { merge: true });
-  batch.set(RESULT_RUN(currentCompetitor.runId), payload, { merge: true });
+  batch.set(CURRENT_COMPETITOR(eventId), payload, { merge: true });
+  batch.set(RESULT_RUN(eventId, currentCompetitor.runId), payload, { merge: true });
   await batch.commit();
 }
 
@@ -547,10 +554,10 @@ function getStartReference(current) {
   };
 }
 
-export async function completeCurrentCompetitor({ actor, click }) {
-  log.info('completeCurrentCompetitor start', { actor, click });
-  await assertStationOwned('finish', actor.uid);
-  const currentSnap = await getDoc(CURRENT_COMPETITOR);
+export async function completeCurrentCompetitor(eventId, { actor, click }) {
+  log.info('completeCurrentCompetitor start', { eventId, actor, click });
+  await assertStationOwned(eventId, 'finish', actor.uid);
+  const currentSnap = await getDoc(CURRENT_COMPETITOR(eventId));
   if (!currentSnap.exists()) {
     throw new Error('no-current-competitor');
   }
@@ -570,7 +577,7 @@ export async function completeCurrentCompetitor({ actor, click }) {
   const batch = writeBatch(db);
 
   if (!current.officialStartClickId && startReference.clickId) {
-    batch.set(RESULT_EVENT(startReference.clickId), {
+    batch.set(RESULT_EVENT(eventId, startReference.clickId), {
       clickId: startReference.clickId,
       runId: current.runId,
       startId: current.startId,
@@ -590,7 +597,7 @@ export async function completeCurrentCompetitor({ actor, click }) {
     }, { merge: true });
   }
 
-  batch.set(RESULT_EVENT(click.clickId), {
+  batch.set(RESULT_EVENT(eventId, click.clickId), {
     clickId: click.clickId,
     runId: current.runId,
     startId: current.startId,
@@ -609,7 +616,7 @@ export async function completeCurrentCompetitor({ actor, click }) {
     syncedAtServer: serverTimestamp(),
   }, { merge: true });
 
-  batch.set(RESULT_RUN(current.runId), {
+  batch.set(RESULT_RUN(eventId, current.runId), {
     status: 'finished',
     startId: current.startId,
     courseId: current.courseId,
@@ -636,7 +643,7 @@ export async function completeCurrentCompetitor({ actor, click }) {
     updatedAt: serverTimestamp(),
   }, { merge: true });
 
-  batch.delete(CURRENT_COMPETITOR);
+  batch.delete(CURRENT_COMPETITOR(eventId));
   await batch.commit();
 
   return {
@@ -648,10 +655,10 @@ export async function completeCurrentCompetitor({ actor, click }) {
   };
 }
 
-export async function abandonCurrentCompetitor({ actor, click }) {
-  log.info('abandonCurrentCompetitor start', { actor, click });
-  await assertStationOwned('finish', actor.uid);
-  const currentSnap = await getDoc(CURRENT_COMPETITOR);
+export async function abandonCurrentCompetitor(eventId, { actor, click }) {
+  log.info('abandonCurrentCompetitor start', { eventId, actor, click });
+  await assertStationOwned(eventId, 'finish', actor.uid);
+  const currentSnap = await getDoc(CURRENT_COMPETITOR(eventId));
   if (!currentSnap.exists()) {
     throw new Error('no-current-competitor');
   }
@@ -665,7 +672,7 @@ export async function abandonCurrentCompetitor({ actor, click }) {
 
   const batch = writeBatch(db);
 
-  batch.set(RESULT_EVENT(click.clickId), {
+  batch.set(RESULT_EVENT(eventId, click.clickId), {
     clickId: click.clickId,
     runId: current.runId,
     startId: current.startId,
@@ -684,7 +691,7 @@ export async function abandonCurrentCompetitor({ actor, click }) {
     syncedAtServer: serverTimestamp(),
   }, { merge: true });
 
-  batch.set(RESULT_RUN(current.runId), {
+  batch.set(RESULT_RUN(eventId, current.runId), {
     status: 'abandoned',
     startId: current.startId,
     courseId: current.courseId,
@@ -709,7 +716,7 @@ export async function abandonCurrentCompetitor({ actor, click }) {
     updatedAt: serverTimestamp(),
   }, { merge: true });
 
-  batch.delete(CURRENT_COMPETITOR);
+  batch.delete(CURRENT_COMPETITOR(eventId));
   await batch.commit();
 
   return {
@@ -720,15 +727,15 @@ export async function abandonCurrentCompetitor({ actor, click }) {
   };
 }
 
-export async function verifyBrowserClock(uid) {
-  log.info('verifyBrowserClock start', { uid });
+export async function verifyBrowserClock(eventId, uid) {
+  log.info('verifyBrowserClock start', { eventId, uid });
   const startedAt = Date.now();
-  await setDoc(CLOCK_CHECK(uid), {
+  await setDoc(CLOCK_CHECK(eventId, uid), {
     uid,
     checkedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   }, { merge: true });
-  const snap = await getDoc(CLOCK_CHECK(uid));
+  const snap = await getDoc(CLOCK_CHECK(eventId, uid));
   const finishedAt = Date.now();
   const serverNow = snap.data()?.checkedAt?.toMillis?.();
   if (!serverNow) {
@@ -743,29 +750,29 @@ export async function verifyBrowserClock(uid) {
   };
 }
 
-export function subscribeResultRuns(onData) {
+export function subscribeResultRuns(eventId, onData) {
   return onSnapshot(
-    query(collection(db, 'resultRuns'), orderBy('updatedAt', 'desc')),
+    query(eventSubcollection(eventId, 'resultRuns'), orderBy('updatedAt', 'desc')),
     (snap) => {
       const runs = snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
-      log.debug('resultRuns snapshot', { count: runs.length });
+      log.debug('resultRuns snapshot', { eventId, count: runs.length });
       onData(runs);
     },
     (error) => {
-      log.error('resultRuns subscription failed', error);
+      log.error('resultRuns subscription failed', { eventId, error });
     },
   );
 }
 
-export function toggleResultEventActive(eventId, active) {
-  log.info('toggleResultEventActive', { eventId, active });
-  return updateDoc(RESULT_EVENT(eventId), {
+export function toggleResultEventActive(eventId, resultEventId, active) {
+  log.info('toggleResultEventActive', { eventId, resultEventId, active });
+  return updateDoc(RESULT_EVENT(eventId, resultEventId), {
     active,
     updatedAt: serverTimestamp(),
   });
 }
 
-export async function toggleResultRunActive({
+export async function toggleResultRunActive(eventId, {
   runId,
   officialStartClickId,
   latestStartClickId,
@@ -774,6 +781,7 @@ export async function toggleResultRunActive({
   active,
 }) {
   log.info('toggleResultRunActive', {
+    eventId,
     runId,
     officialStartClickId,
     latestStartClickId,
@@ -794,14 +802,14 @@ export async function toggleResultRunActive({
   ].filter(Boolean))];
 
   const batch = writeBatch(db);
-  batch.set(RESULT_RUN(runId), {
+  batch.set(RESULT_RUN(eventId, runId), {
     active,
     adminEditedAtServer: serverTimestamp(),
     updatedAt: serverTimestamp(),
   }, { merge: true });
 
-  eventIds.forEach((eventId) => {
-    batch.set(RESULT_EVENT(eventId), {
+  eventIds.forEach((resultEventId) => {
+    batch.set(RESULT_EVENT(eventId, resultEventId), {
       active,
       updatedAt: serverTimestamp(),
     }, { merge: true });
@@ -810,7 +818,7 @@ export async function toggleResultRunActive({
   await batch.commit();
 }
 
-export async function upsertAdminRun({
+export async function upsertAdminRun(eventId, {
   runId,
   startId,
   courseId,
@@ -823,6 +831,7 @@ export async function upsertAdminRun({
   actor,
 }) {
   log.info('upsertAdminRun start', {
+    eventId,
     runId,
     startId,
     courseId,
@@ -854,7 +863,7 @@ export async function upsertAdminRun({
   const durationMs = status === 'finished' ? terminalAtClientMs - startAtClientMs : null;
   const durationLabel = durationMs == null ? null : formatDurationMs(durationMs);
 
-  const existingEvents = await getDocs(query(collection(db, 'resultEvents'), where('runId', '==', nextRunId)));
+  const existingEvents = await getDocs(query(eventSubcollection(eventId, 'resultEvents'), where('runId', '==', nextRunId)));
   const batch = writeBatch(db);
 
   existingEvents.docs.forEach((entry) => {
@@ -864,7 +873,7 @@ export async function upsertAdminRun({
     }, { merge: true });
   });
 
-  batch.set(RESULT_EVENT(startClickId), {
+  batch.set(RESULT_EVENT(eventId, startClickId), {
     clickId: startClickId,
     runId: nextRunId,
     startId: nextStartId,
@@ -884,7 +893,7 @@ export async function upsertAdminRun({
     adminEditedAtServer: serverTimestamp(),
   }, { merge: true });
 
-  batch.set(RESULT_EVENT(terminalClickId), {
+  batch.set(RESULT_EVENT(eventId, terminalClickId), {
     clickId: terminalClickId,
     runId: nextRunId,
     startId: nextStartId,
@@ -904,7 +913,7 @@ export async function upsertAdminRun({
     adminEditedAtServer: serverTimestamp(),
   }, { merge: true });
 
-  batch.set(RESULT_RUN(nextRunId), {
+  batch.set(RESULT_RUN(eventId, nextRunId), {
     runId: nextRunId,
     startId: nextStartId,
     courseId,
@@ -954,25 +963,25 @@ export async function upsertAdminRun({
   };
 }
 
-export async function upsertAdminFinishedRun({
+export async function upsertAdminFinishedRun(eventId, {
   finishAtClientMs,
   ...rest
 }) {
-  return upsertAdminRun({
+  return upsertAdminRun(eventId, {
     ...rest,
     status: 'finished',
     terminalAtClientMs: finishAtClientMs,
   });
 }
 
-export async function exportCourseArchive(courseId) {
-  log.info('exportCourseArchive start', { courseId });
+export async function exportCourseArchive(eventId, courseId) {
+  log.info('exportCourseArchive start', { eventId, courseId });
   const [resultEvents, resultRuns, currentSnap, startStationSnap, finishStationSnap] = await Promise.all([
-    getCourseDocs('resultEvents', courseId),
-    getCourseDocs('resultRuns', courseId),
-    getDoc(CURRENT_COMPETITOR),
-    getDoc(RESULT_STATION('start')),
-    getDoc(RESULT_STATION('finish')),
+    getCourseDocs(eventId, 'resultEvents', courseId),
+    getCourseDocs(eventId, 'resultRuns', courseId),
+    getDoc(CURRENT_COMPETITOR(eventId)),
+    getDoc(RESULT_STATION(eventId, 'start')),
+    getDoc(RESULT_STATION(eventId, 'finish')),
   ]);
 
   const currentCompetitor = currentSnap.exists() && currentSnap.data().courseId === courseId
@@ -1018,13 +1027,13 @@ export async function exportCourseArchive(courseId) {
   };
 }
 
-export async function deleteCourseData(courseId) {
-  log.info('deleteCourseData start', { courseId });
+export async function deleteCourseData(eventId, courseId) {
+  log.info('deleteCourseData start', { eventId, courseId });
   const [resultEvents, resultRuns, currentSnap, startStationSnap] = await Promise.all([
-    getDocs(query(collection(db, 'resultEvents'), where('courseId', '==', courseId))),
-    getDocs(query(collection(db, 'resultRuns'), where('courseId', '==', courseId))),
-    getDoc(CURRENT_COMPETITOR),
-    getDoc(RESULT_STATION('start')),
+    getDocs(query(eventSubcollection(eventId, 'resultEvents'), where('courseId', '==', courseId))),
+    getDocs(query(eventSubcollection(eventId, 'resultRuns'), where('courseId', '==', courseId))),
+    getDoc(CURRENT_COMPETITOR(eventId)),
+    getDoc(RESULT_STATION(eventId, 'start')),
   ]);
 
   const batch = writeBatch(db);
@@ -1032,11 +1041,11 @@ export async function deleteCourseData(courseId) {
   resultRuns.docs.forEach((entry) => batch.delete(entry.ref));
 
   if (currentSnap.exists() && currentSnap.data().courseId === courseId) {
-    batch.delete(CURRENT_COMPETITOR);
+    batch.delete(CURRENT_COMPETITOR(eventId));
   }
 
   if (startStationSnap.exists() && startStationSnap.data().currentCourseId === courseId) {
-    batch.set(RESULT_STATION('start'), {
+    batch.set(RESULT_STATION(eventId, 'start'), {
       currentCourseId: null,
       currentCourseLabel: '',
       currentCourseUpdatedAt: deleteField(),
@@ -1047,17 +1056,17 @@ export async function deleteCourseData(courseId) {
   await batch.commit();
 }
 
-export async function deleteAllResultsData() {
-  log.info('deleteAllResultsData start');
+export async function deleteAllResultsData(eventId) {
+  log.info('deleteAllResultsData start', { eventId });
   const [allEvents, allRuns, allStations, allCurrentStations, currentSnap, allParticipants, allLightUsers, allLightRequests] = await Promise.all([
-    getDocs(collection(db, 'resultEvents')),
-    getDocs(collection(db, 'resultRuns')),
-    getDocs(collection(db, 'resultStations')),
-    getDocs(collection(db, 'currentStations')),
-    getDoc(CURRENT_COMPETITOR),
-    getDocs(collection(db, 'participants')),
-    getDocs(collection(db, 'allowedResultUsers')),
-    getDocs(collection(db, 'resultAccessRequests')),
+    getDocs(eventSubcollection(eventId, 'resultEvents')),
+    getDocs(eventSubcollection(eventId, 'resultRuns')),
+    getDocs(eventSubcollection(eventId, 'resultStations')),
+    getDocs(eventSubcollection(eventId, 'currentStations')),
+    getDoc(CURRENT_COMPETITOR(eventId)),
+    getDocs(eventSubcollection(eventId, 'participants')),
+    getDocs(eventSubcollection(eventId, 'allowedResultUsers')),
+    getDocs(eventSubcollection(eventId, 'resultAccessRequests')),
   ]);
 
   const batch = writeBatch(db);
@@ -1070,25 +1079,25 @@ export async function deleteAllResultsData() {
   allLightRequests.docs.forEach((entry) => batch.delete(entry.ref));
 
   if (currentSnap.exists()) {
-    batch.delete(CURRENT_COMPETITOR);
+    batch.delete(CURRENT_COMPETITOR(eventId));
   }
 
-  batch.set(STREAMS_REF, { streams: [] });
+  batch.set(STREAMS_REF(eventId), { streams: [] });
   await batch.commit();
 }
 
-export async function exportAllResultsArchive() {
-  log.info('exportAllResultsArchive start');
+export async function exportAllResultsArchive(eventId) {
+  log.info('exportAllResultsArchive start', { eventId });
   const [resultEvents, resultRuns, currentSnap, stationSnaps, currentStationSnaps, participants, streamsSnap, allowedResultUsers, resultAccessRequests] = await Promise.all([
-    getAllDocs('resultEvents'),
-    getAllDocs('resultRuns'),
-    getDoc(CURRENT_COMPETITOR),
-    getDocs(collection(db, 'resultStations')),
-    getDocs(collection(db, 'currentStations')),
-    getAllDocs('participants'),
-    getDoc(STREAMS_REF),
-    getAllDocs('allowedResultUsers'),
-    getAllDocs('resultAccessRequests'),
+    getAllDocs(eventId, 'resultEvents'),
+    getAllDocs(eventId, 'resultRuns'),
+    getDoc(CURRENT_COMPETITOR(eventId)),
+    getDocs(eventSubcollection(eventId, 'resultStations')),
+    getDocs(eventSubcollection(eventId, 'currentStations')),
+    getAllDocs(eventId, 'participants'),
+    getDoc(STREAMS_REF(eventId)),
+    getAllDocs(eventId, 'allowedResultUsers'),
+    getAllDocs(eventId, 'resultAccessRequests'),
   ]);
 
   const stations = stationSnaps.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
@@ -1120,8 +1129,8 @@ export async function exportAllResultsArchive() {
   };
 }
 
-export async function restoreCourseArchive(fileOrBlob) {
-  log.info('restoreCourseArchive start');
+export async function restoreCourseArchive(eventId, fileOrBlob) {
+  log.info('restoreCourseArchive start', { eventId });
   const { filename, content } = await readSingleFileZip(fileOrBlob);
   if (filename !== RESULT_ARCHIVE_FILENAME) {
     throw new Error('archive-invalid-file');
@@ -1143,14 +1152,14 @@ export async function restoreCourseArchive(fileOrBlob) {
 
   if (scope === 'all') {
     const [allEvents, allRuns, allStations, allCurrentStations, currentSnap, allParticipants, allLightUsers, allLightRequests] = await Promise.all([
-      getDocs(collection(db, 'resultEvents')),
-      getDocs(collection(db, 'resultRuns')),
-      getDocs(collection(db, 'resultStations')),
-      getDocs(collection(db, 'currentStations')),
-      getDoc(CURRENT_COMPETITOR),
-      getDocs(collection(db, 'participants')),
-      getDocs(collection(db, 'allowedResultUsers')),
-      getDocs(collection(db, 'resultAccessRequests')),
+      getDocs(eventSubcollection(eventId, 'resultEvents')),
+      getDocs(eventSubcollection(eventId, 'resultRuns')),
+      getDocs(eventSubcollection(eventId, 'resultStations')),
+      getDocs(eventSubcollection(eventId, 'currentStations')),
+      getDoc(CURRENT_COMPETITOR(eventId)),
+      getDocs(eventSubcollection(eventId, 'participants')),
+      getDocs(eventSubcollection(eventId, 'allowedResultUsers')),
+      getDocs(eventSubcollection(eventId, 'resultAccessRequests')),
     ]);
     allEvents.docs.forEach((entry) => batch.delete(entry.ref));
     allRuns.docs.forEach((entry) => batch.delete(entry.ref));
@@ -1160,66 +1169,66 @@ export async function restoreCourseArchive(fileOrBlob) {
     allLightUsers.docs.forEach((entry) => batch.delete(entry.ref));
     allLightRequests.docs.forEach((entry) => batch.delete(entry.ref));
     if (currentSnap.exists()) {
-      batch.delete(CURRENT_COMPETITOR);
+      batch.delete(CURRENT_COMPETITOR(eventId));
     }
-    batch.set(STREAMS_REF, { streams: [] });
+    batch.set(STREAMS_REF(eventId), { streams: [] });
   }
 
   (data.resultEvents ?? []).forEach((entry) => {
     const { id, ...payload } = entry;
-    batch.set(RESULT_EVENT(id), payload);
+    batch.set(RESULT_EVENT(eventId, id), payload);
   });
 
   (data.resultRuns ?? []).forEach((entry) => {
     const { id, ...payload } = entry;
-    batch.set(RESULT_RUN(id), payload);
+    batch.set(RESULT_RUN(eventId, id), payload);
   });
 
   if (data.currentCompetitor?.id) {
     const { id, ...payload } = data.currentCompetitor;
-    batch.set(CURRENT_COMPETITOR, payload);
+    batch.set(CURRENT_COMPETITOR(eventId), payload);
   }
 
   if (Array.isArray(data.resultStations)) {
     data.resultStations.forEach((station) => {
       const { id, ...payload } = station;
-      batch.set(RESULT_STATION(id), payload, { merge: true });
+      batch.set(RESULT_STATION(eventId, id), payload, { merge: true });
     });
   } else {
     if (data.startStation?.id === 'start') {
       const { id, ...payload } = data.startStation;
-      batch.set(RESULT_STATION('start'), payload, { merge: true });
+      batch.set(RESULT_STATION(eventId, 'start'), payload, { merge: true });
     }
     if (data.finishStation?.id === 'finish') {
       const { id, ...payload } = data.finishStation;
-      batch.set(RESULT_STATION('finish'), payload, { merge: true });
+      batch.set(RESULT_STATION(eventId, 'finish'), payload, { merge: true });
     }
   }
 
   if (Array.isArray(data.currentStations)) {
     data.currentStations.forEach((station) => {
       const { id, ...payload } = station;
-      batch.set(doc(db, 'currentStations', id), payload, { merge: true });
+      batch.set(eventSubdoc(eventId, 'currentStations', id), payload, { merge: true });
     });
   }
 
   if (scope === 'all') {
     (data.participants ?? []).forEach((entry) => {
       const { id, ...payload } = entry;
-      batch.set(PARTICIPANT(id), payload);
+      batch.set(PARTICIPANT(eventId, id), payload);
     });
 
     (data.allowedResultUsers ?? []).forEach((entry) => {
       const { id, ...payload } = entry;
-      batch.set(RESULT_ACCESS(id), payload);
+      batch.set(RESULT_ACCESS(eventId, id), payload);
     });
 
     (data.resultAccessRequests ?? []).forEach((entry) => {
       const { id, ...payload } = entry;
-      batch.set(RESULT_REQUEST(id), payload);
+      batch.set(RESULT_REQUEST(eventId, id), payload);
     });
 
-    batch.set(STREAMS_REF, {
+    batch.set(STREAMS_REF(eventId), {
       streams: data.streams ?? [],
     });
   }

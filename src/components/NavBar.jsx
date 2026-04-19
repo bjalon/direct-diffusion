@@ -1,20 +1,22 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ROUTES } from '../utils/routes';
+import { useEventContext } from '../context/EventContext';
+import { buildEventRoute, HOME_ROUTE } from '../utils/routes';
 
 const ALL_LINKS = [
-  { to: ROUTES.display,      label: 'Affichage',   role: null },
-  { to: ROUTES.results,      label: 'Résultats',   role: 'results_view' },
-  { to: ROUTES.flow,         label: 'Flow',        role: null },
-  { to: ROUTES.flowAdmin,    label: 'Flow admin',  role: 'streams_admin' },
-  { to: ROUTES.layouts,      label: 'Layouts',     role: null },
-  { to: ROUTES.participants, label: 'Participants', role: 'participants' },
-  { to: ROUTES.runs,         label: 'Runs',        role: 'administration' },
-  { to: ROUTES.admin,        label: 'Admin',       role: 'administration' },
-  { to: ROUTES.archives,     label: 'Archives',    role: 'administration' },
+  { routeKey: 'display', label: 'Affichage', role: null },
+  { routeKey: 'results', label: 'Résultats', role: 'results_view' },
+  { routeKey: 'flow', label: 'Flow', role: null },
+  { routeKey: 'flowAdmin', label: 'Flow admin', role: 'streams_admin' },
+  { routeKey: 'layouts', label: 'Layouts', role: null },
+  { routeKey: 'participants', label: 'Participants', role: 'participants' },
+  { routeKey: 'runs', label: 'Runs', role: 'administration' },
+  { routeKey: 'admin', label: 'Admin', role: 'administration' },
+  { routeKey: 'archives', label: 'Archives', role: 'administration' },
 ];
 
 export default function NavBar({ user, onLogout, roles, identityLabel, config, onSelectConfiguration }) {
+  const { event } = useEventContext();
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
   const [configurationMenuOpen, setConfigurationMenuOpen] = useState(false);
@@ -24,7 +26,12 @@ export default function NavBar({ user, onLogout, roles, identityLabel, config, o
     setConfigurationMenuOpen(false);
   };
 
-  const links = ALL_LINKS.filter(({ role }) => !role || roles?.[role]);
+  const links = ALL_LINKS
+    .filter(({ role }) => !role || roles?.[role])
+    .map(({ routeKey, ...link }) => ({
+      ...link,
+      to: buildEventRoute(event.slug, routeKey),
+    }));
   const configurationEntries = Object.entries(config?.configurations ?? {});
   const activeConfiguration = configurationEntries.find(([id]) => id === config?.activeConfigurationId)?.[1]
     ?? configurationEntries[0]?.[1]
@@ -33,7 +40,9 @@ export default function NavBar({ user, onLogout, roles, identityLabel, config, o
   return (
     <nav className="navbar">
       {/* ── Single row ── */}
-      <div className="navbar-brand">Direct Diffusion</div>
+      <Link to={HOME_ROUTE} className="navbar-brand">
+        {event.title}
+      </Link>
 
       {/* Links — hidden on small screens */}
       <div className="navbar-links">

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useEventContext } from '../../context/EventContext';
 import { subscribeResultEvents } from '../../firebase/results';
 import { deriveFinishedCourses } from '../../utils/resultsDerivation';
 
@@ -7,13 +8,14 @@ import { deriveFinishedCourses } from '../../utils/resultsDerivation';
  * delay: rotation interval in seconds (from stream config).
  */
 export default function CoursesTermineesDisplay({ delay = 10 }) {
+  const { event } = useEventContext();
   const [courses, setCourses] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [visible, setVisible] = useState(true);
 
   useEffect(() => {
-    return subscribeResultEvents((events) => setCourses(deriveFinishedCourses(events)));
-  }, []);
+    return subscribeResultEvents(event.id, (events) => setCourses(deriveFinishedCourses(events)));
+  }, [event.id]);
 
   const currentCourse = courses[currentIndex] ?? null;
 

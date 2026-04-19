@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useEventContext } from '../context/EventContext';
 import {
   deleteAllResultsData,
   deleteCourseData,
@@ -13,6 +14,7 @@ import { RESULT_ARCHIVE_MODEL_VERSION } from '../utils/resultArchiveModel';
 const RESET_ALL_CONFIRMATION = 'SUPPRIMER TOUT';
 
 export default function ResultsArchivePage() {
+  const { event } = useEventContext();
   const [events, setEvents] = useState([]);
   const [archiveBusyKey, setArchiveBusyKey] = useState('');
   const [archiveMessage, setArchiveMessage] = useState('');
@@ -20,7 +22,7 @@ export default function ResultsArchivePage() {
   const [resetConfirmation, setResetConfirmation] = useState('');
   const [resetPasteBlocked, setResetPasteBlocked] = useState(false);
 
-  useEffect(() => subscribeResultEvents((entries) => setEvents(sortEventsNewestFirst(entries))), []);
+  useEffect(() => subscribeResultEvents(event.id, (entries) => setEvents(sortEventsNewestFirst(entries))), [event.id]);
 
   const courseSummaries = useMemo(() => {
     const byCourse = new Map();
@@ -75,16 +77,16 @@ export default function ResultsArchivePage() {
 
       <section className="config-section">
         <div className="admin-section-head">
-          <h2 className="section-title">Archive globale</h2>
+          <h2 className="section-title">Archive complète de l&apos;événement</h2>
         </div>
         <div className="results-archive-toolbar">
           <button
             className="btn btn-secondary"
             disabled={archiveBusyKey !== '' && archiveBusyKey !== 'export-all'}
             onClick={() => runArchiveAction('export-all', async () => {
-              const { blob, filename } = await exportAllResultsArchive();
+              const { blob, filename } = await exportAllResultsArchive(event.id);
               downloadBlob(blob, filename);
-              setArchiveMessage('Export global terminé.');
+              setArchiveMessage(`Export complet terminé pour ${event.title}.`);
             })}
           >
             {archiveBusyKey === 'export-all' ? 'Export…' : 'Exporter tout'}
@@ -101,7 +103,7 @@ export default function ResultsArchivePage() {
                 e.target.value = '';
                 if (!file) return;
                 runArchiveAction('restore', async () => {
-                  const result = await restoreCourseArchive(file);
+                  const result = await restoreCourseArchive(event.id, file);
                   if (result.scope === 'all') {
                     setArchiveMessage(`Archive globale restaurée (modèle v${result.version}).`);
                   } else {
@@ -117,7 +119,7 @@ export default function ResultsArchivePage() {
             <h3 className="results-reset-title">Réinitialisation totale</h3>
             <p className="hint">
               Supprime toutes les données de résultats, les participants, les flux vidéo, les utilisateurs non-OAuth
-              autorisés et leurs demandes d’accès.
+              autorisés et leurs demandes d’accès de <strong>{event.title}</strong>.
             </p>
             <p className="hint">
               Pour confirmer, saisis exactement <strong>{RESET_ALL_CONFIRMATION}</strong>. Le collage est désactivé.
@@ -147,10 +149,10 @@ export default function ResultsArchivePage() {
               className="btn btn-danger"
               disabled={archiveBusyKey !== '' || resetConfirmation !== RESET_ALL_CONFIRMATION}
               onClick={() => runArchiveAction('reset-all', async () => {
-                await deleteAllResultsData();
+                await deleteAllResultsData(event.id);
                 setResetConfirmation('');
                 setResetPasteBlocked(false);
-                setArchiveMessage('Réinitialisation totale effectuée.');
+                setArchiveMessage(`Réinitialisation totale effectuée pour ${event.title}.`);
               })}
             >
               {archiveBusyKey === 'reset-all' ? 'Réinitialisation…' : 'Tout réinitialiser'}
@@ -179,7 +181,7 @@ export default function ResultsArchivePage() {
                     className="btn btn-secondary btn-sm"
                     disabled={archiveBusyKey !== '' && archiveBusyKey !== `export:${course.courseId}`}
                     onClick={() => runArchiveAction(`export:${course.courseId}`, async () => {
-                      const { blob, filename } = await exportCourseArchive(course.courseId);
+                      const { blob, filename } = await exportCourseArchive(event.id, course.courseId);
                       downloadBlob(blob, filename);
                       setArchiveMessage(`Archive exportée pour ${course.courseId}.`);
                     })}
@@ -190,9 +192,9 @@ export default function ResultsArchivePage() {
                     className="btn btn-danger btn-sm"
                     disabled={archiveBusyKey !== '' && archiveBusyKey !== `archive:${course.courseId}`}
                     onClick={() => runArchiveAction(`archive:${course.courseId}`, async () => {
-                      const { blob, filename } = await exportCourseArchive(course.courseId);
+                      const { blob, filename } = await exportCourseArchive(event.id, course.courseId);
                       downloadBlob(blob, filename);
-                      await deleteCourseData(course.courseId);
+                      await deleteCourseData(event.id, course.courseId);
                       setArchiveMessage(`Course ${course.courseId} archivée puis supprimée.`);
                     })}
                   >

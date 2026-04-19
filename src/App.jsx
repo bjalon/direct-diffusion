@@ -1,21 +1,33 @@
-import { useEffect, useState } from 'react';
-import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  HashRouter,
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useParams,
+} from 'react-router-dom';
+import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { auth } from './firebase';
 import { requestAccess } from './firebase/admin';
+import { getGlobalRoles, subscribeEvent } from './firebase/events';
 import { getUserRoles, saveStreams, seedStreamsIfEmpty, subscribeStreams } from './firebase/streams';
 import NavBar from './components/NavBar';
+import { EventProvider } from './context/EventContext';
 import { buildSrcFromUrl, normalizeFacebookEmbedSrc } from './utils/iframeParser';
 import { createLogger } from './utils/logger';
 import { rememberAnonymousAccount } from './utils/anonymousAccounts';
 import { loadConfig, normalizeConfigState, saveConfig } from './utils/storage';
-import { LEGACY_ROUTE_REDIRECTS, ROUTES } from './utils/routes';
+import { EVENTS_ADMIN_ROUTE, buildEventRoute, HOME_ROUTE, LEGACY_ROUTE_REDIRECTS } from './utils/routes';
 import AdminPage from './pages/AdminPage';
 import ConfigPage from './pages/ConfigPage';
 import DisplayPage from './pages/DisplayPage';
+import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import ParticipantsPage from './pages/ParticipantsPage';
 import LayoutsPage from './pages/LayoutsPage';
+import EventAdminPage from './pages/EventAdminPage';
 import ResultsArchivePage from './pages/ResultsArchivePage';
 import ResultsRunsPage from './pages/ResultsRunsPage';
 import ResultsViewerPage from './pages/ResultsViewerPage';
@@ -23,6 +35,8 @@ import ResultsPage from './pages/ResultsPage';
 import AdminStreamsPage from './pages/AdminStreamsPage';
 import { BUILTIN_VIRTUAL_STREAM } from './utils/virtualDisplay';
 import { subscribeResultAccess, subscribeResultAccessRequest } from './firebase/results';
+const googleProvider = new GoogleAuthProvider();
+const log = createLogger('App');
 
 function orientationToRotation(orientation) {
   const map = { 'landscape-ccw': -90, 'landscape-cw': 90, landscape: -90, portrait: 0 };
@@ -62,16 +76,9 @@ function normaliseStream(raw) {
   return null;
 }
 
-const log = createLogger('App');
-
 export default function App() {
   const [user, setUser] = useState(null);
-  const [roles, setRoles] = useState(null);
-  const [layoutSlots, setLayoutSlots] = useState(loadConfig);
-  const [streams, setStreams] = useState([]);
-  const [accessRequestState, setAccessRequestState] = useState('idle');
-  const [deviceAccess, setDeviceAccess] = useState(null);
-  const [deviceRequest, setDeviceRequest] = useState(null);
+  const [globalRoles, setGlobalRoles] = useState(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (nextUser) => {
@@ -82,54 +89,246 @@ export default function App() {
         providers: nextUser?.providerData?.map((provider) => provider.providerId),
       });
       setUser(nextUser ?? false);
-      setAccessRequestState('idle');
-      setRoles(nextUser && !nextUser.isAnonymous ? null : false);
+      setGlobalRoles(nextUser && !nextUser.isAnonymous ? null : false);
     });
     return unsub;
   }, []);
 
   useEffect(() => {
     if (!user || user === false || user.isAnonymous) {
-      log.debug('skip roles loading', {
-        hasUser: !!user,
-        isAnonymous: user?.isAnonymous,
+      setGlobalRoles(false);
+      return;
+    }
+
+    setGlobalRoles(null);
+    getGlobalRoles(user.email)
+      .then((roles) => setGlobalRoles(roles ?? false))
+      .catch((error) => {
+        log.error('global roles loading failed', { email: user.email, error });
+        setGlobalRoles(false);
       });
+  }, [user]);
+
+  if (user === null || (user && user !== false && !user.isAnonymous && globalRoles === null)) {
+    return (
+      <div className="app-loading">
+        <div className="login-spinner" />
+      </div>
+    );
+  }
+
+  return (
+    <HashRouter>
+      <Routes>
+        {LEGACY_ROUTE_REDIRECTS.map(({ from, to }) => (
+          <Route key={from} path={from} element={<Navigate to={to} replace />} />
+        ))}
+        <Route
+          path={HOME_ROUTE}
+          element={(
+            <HomePage
+              user={user}
+              globalRoles={globalRoles}
+              onGoogleSignIn={async () => signInWithPopup(auth, googleProvider)}
+              onLogout={() => signOut(auth)}
+            />
+          )}
+        />
+        <Route
+          path={EVENTS_ADMIN_ROUTE}
+          element={(
+            <GlobalEventsAdminRoute
+              user={user}
+              globalRoles={globalRoles}
+              onGoogleSignIn={async () => signInWithPopup(auth, googleProvider)}
+              onLogout={() => signOut(auth)}
+            />
+          )}
+        />
+        <Route
+          path="/events/:eventSlug/*"
+          element={<EventShell user={user} globalRoles={globalRoles} />}
+        />
+        <Route path="*" element={<Navigate to={HOME_ROUTE} replace />} />
+      </Routes>
+    </HashRouter>
+  );
+}
+
+function GlobalEventsAdminRoute({
+  user,
+  globalRoles,
+  onGoogleSignIn,
+  onLogout,
+}) {
+  if (user === false || user?.isAnonymous) {
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <h1 className="login-title">Administration des événements</h1>
+          <p className="login-subtitle">
+            Cette vue est réservée aux utilisateurs Google autorisés avec le rôle <code>admin_events</code>.
+          </p>
+          <div className="login-form">
+            <button className="btn btn-primary login-btn" onClick={onGoogleSignIn}>
+              Se connecter avec Google
+            </button>
+            <NavigateButton to={HOME_ROUTE} label="Retour à la home" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasGoogleProvider(user) || !globalRoles?.admin_events) {
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <h1 className="login-title">Accès refusé</h1>
+          <p className="login-subtitle">
+            L&apos;adresse <strong className="login-email">{user?.email || '—'}</strong> n&apos;a pas le droit
+            global <code>admin_events</code>.
+          </p>
+          <div className="login-form">
+            <button className="btn btn-secondary login-btn" onClick={onLogout}>
+              Se déconnecter
+            </button>
+            <NavigateButton to={HOME_ROUTE} label="Retour à la home" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-root">
+      <GlobalAdminNavBar user={user} onLogout={onLogout} />
+      <main className="app-main">
+        <EventAdminPage currentUser={user} />
+      </main>
+    </div>
+  );
+}
+
+function GlobalAdminNavBar({ user, onLogout }) {
+  const { pathname } = useLocation();
+  const [open, setOpen] = useState(false);
+
+  const close = () => setOpen(false);
+  const links = [{ to: EVENTS_ADMIN_ROUTE, label: 'Événements' }];
+
+  return (
+    <nav className="navbar">
+      <Link to={HOME_ROUTE} className="navbar-brand" onClick={close}>
+        Accueil
+      </Link>
+
+      <div className="navbar-links">
+        {links.map(({ to, label }) => (
+          <Link key={to} to={to} className={pathname === to ? 'active' : ''} onClick={close}>
+            {label}
+          </Link>
+        ))}
+      </div>
+
+      <div className="navbar-right">
+        <span className="navbar-email">{user?.email || '—'}</span>
+        <button className="btn btn-secondary btn-sm navbar-logout" onClick={onLogout} type="button">
+          Déconnexion
+        </button>
+        <button
+          className="navbar-burger"
+          onClick={() => setOpen((value) => !value)}
+          aria-label="Menu"
+          aria-expanded={open}
+          type="button"
+        >
+          <span /><span /><span />
+        </button>
+      </div>
+
+      {open && (
+        <>
+          <div className="navbar-backdrop" onClick={close} />
+          <div className="navbar-dropdown">
+            <Link to={HOME_ROUTE} onClick={close}>
+              Accueil
+            </Link>
+            {links.map(({ to, label }) => (
+              <Link key={to} to={to} className={pathname === to ? 'active' : ''} onClick={close}>
+                {label}
+              </Link>
+            ))}
+            <div className="navbar-dropdown-divider" />
+            <button className="navbar-dropdown-logout" onClick={() => { onLogout(); close(); }} type="button">
+              Déconnexion
+            </button>
+          </div>
+        </>
+      )}
+    </nav>
+  );
+}
+
+function EventShell({ user, globalRoles }) {
+  const { eventSlug } = useParams();
+  const { pathname } = useLocation();
+  const [event, setEvent] = useState(undefined);
+  const [roles, setRoles] = useState(null);
+  const [layoutSlots, setLayoutSlots] = useState(() => loadConfig(eventSlug));
+  const [streams, setStreams] = useState([]);
+  const [accessRequestState, setAccessRequestState] = useState('idle');
+  const [deviceAccess, setDeviceAccess] = useState(null);
+  const [deviceRequest, setDeviceRequest] = useState(null);
+  const isGlobalEventAdministrator = !!(globalRoles?.admin_events && hasGoogleProvider(user));
+
+  useEffect(() => {
+    setLayoutSlots(loadConfig(eventSlug));
+  }, [eventSlug]);
+
+  useEffect(() => {
+    if (!eventSlug) return undefined;
+    return subscribeEvent(eventSlug, setEvent);
+  }, [eventSlug]);
+
+  useEffect(() => {
+    if (!event || !user || user === false || user.isAnonymous) {
       setRoles(false);
       return;
     }
 
-    setRoles(null);
-    log.info('loading user roles', { email: user.email, uid: user.uid });
-    getUserRoles(user.email)
-      .then((nextRoles) => {
-        log.info('roles loaded', { email: user.email, roles: nextRoles });
-        setRoles(nextRoles ?? false);
-      })
+    if (isGlobalEventAdministrator) {
+      setRoles(false);
+      return;
+    }
+
+    getUserRoles(event.id, user.email)
+      .then((nextRoles) => setRoles(nextRoles ?? false))
       .catch((error) => {
-        log.error('roles loading failed', { email: user.email, error });
+        log.error('event roles loading failed', { eventId: event.id, email: user.email, error });
         setRoles(false);
       });
-  }, [user]);
+  }, [event?.id, isGlobalEventAdministrator, user]);
 
   useEffect(() => {
-    if (!user || user === false) {
+    if (!event?.id || !user || user === false) {
       setDeviceAccess(null);
       return undefined;
     }
-    return subscribeResultAccess(user.uid, setDeviceAccess);
-  }, [user?.uid]);
+    return subscribeResultAccess(event.id, user.uid, setDeviceAccess);
+  }, [event?.id, user?.uid]);
 
   useEffect(() => {
-    if (!user || user === false) {
+    if (!event?.id || !user || user === false) {
       setDeviceRequest(null);
       return undefined;
     }
-    return subscribeResultAccessRequest(user.uid, setDeviceRequest);
-  }, [user?.uid]);
+    return subscribeResultAccessRequest(event.id, user.uid, setDeviceRequest);
+  }, [event?.id, user?.uid]);
 
   useEffect(() => {
-    if (!user?.isAnonymous) return;
-    rememberAnonymousAccount(auth, user, {
+    if (!event?.id || !user?.isAnonymous) return;
+    rememberAnonymousAccount(auth, user, event.id, {
       email: deviceAccess?.email || deviceRequest?.email || user.email || '',
       roles: {
         tv: !!deviceAccess?.tv,
@@ -139,6 +338,7 @@ export default function App() {
       requestStatus: deviceRequest?.status || '',
     });
   }, [
+    event?.id,
     user?.uid,
     user?.isAnonymous,
     user?.email,
@@ -151,48 +351,43 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    const canReadStreams = (!user || user === false)
-      ? false
-      : (user.isAnonymous ? !!deviceAccess?.tv : !!(roles && roles !== false));
+    const canReadStreams = !!event?.id && (
+      user?.isAnonymous ? !!deviceAccess?.tv : isGlobalEventAdministrator || !!(roles && roles !== false)
+    );
 
-    if (!canReadStreams) {
-      log.debug('skip stream subscription', {
-        hasUser: !!user,
-        isAnonymous: user?.isAnonymous,
-        roles,
-        deviceAccess,
-      });
+    if (!canReadStreams || !event?.id) {
       setStreams([]);
-      return;
+      return undefined;
     }
 
-    log.info('subscribing streams', { email: user.email });
-    const unsub = subscribeStreams(setStreams);
-
+    const unsub = subscribeStreams(event.id, setStreams);
     fetch('./streams.json')
       .then((response) => (response.ok ? response.json() : []))
       .then((raw) => {
-        log.debug('streams.json loaded', { count: Array.isArray(raw) ? raw.length : 0 });
         if (!Array.isArray(raw) || raw.length === 0) return;
         const normalised = raw.map(normaliseStream).filter(Boolean);
-        if (normalised.length > 0) seedStreamsIfEmpty(normalised).catch(() => {});
+        if (normalised.length > 0) seedStreamsIfEmpty(event.id, normalised).catch(() => {});
       })
       .catch((error) => {
-        log.warn('streams.json fetch failed', { error });
+        log.warn('streams.json fetch failed', { eventId: event.id, error });
       });
 
     return unsub;
-  }, [user, roles, deviceAccess?.tv]);
+  }, [event?.id, user?.isAnonymous, deviceAccess?.tv, isGlobalEventAdministrator, roles]);
 
-  if (user === null || (user && user !== false && !user.isAnonymous && roles === null)) {
-    return (
-      <div className="app-loading">
-        <div className="login-spinner" />
-      </div>
-    );
-  }
+  const permissions = useMemo(() => {
+    if (isGlobalEventAdministrator) {
+      return {
+        administration: true,
+        admin_flux: true,
+        streams_admin: true,
+        participants: true,
+        tv: false,
+        results_view: true,
+        identityLabel: user?.email || '',
+      };
+    }
 
-  const permissions = (() => {
     if (roles && roles !== false) {
       const isAdministration = !!roles.administration && hasGoogleProvider(user);
       return {
@@ -219,7 +414,7 @@ export default function App() {
     }
 
     return null;
-  })();
+  }, [deviceAccess?.email, deviceAccess?.tv, isGlobalEventAdministrator, roles, user]);
 
   const updateConfig = (updater) => {
     const prevFull = { ...layoutSlots, streams };
@@ -228,62 +423,16 @@ export default function App() {
     const normalizedLayoutState = normalizeConfigState(nextLayoutSlots);
 
     setLayoutSlots(normalizedLayoutState);
-    saveConfig(normalizedLayoutState);
-    log.info('layout config updated', {
-      configurationId: normalizedLayoutState.activeConfigurationId,
-      layout: normalizedLayoutState.layout,
-      slots: normalizedLayoutState.slots,
-      streamCount: nextStreams?.length,
-    });
+    saveConfig(normalizedLayoutState, event?.id);
 
-    if (nextStreams !== streams && permissions?.admin_flux) {
-      log.info('saving streams to firestore', { count: nextStreams.length });
-      saveStreams(nextStreams);
+    if (nextStreams !== streams && (permissions?.admin_flux || permissions?.streams_admin) && event?.id) {
+      saveStreams(event.id, nextStreams);
     }
   };
 
-  return (
-    <HashRouter>
-      <AppShell
-        user={user}
-        permissions={permissions}
-        config={{
-          ...layoutSlots,
-          streams: [
-            {
-              ...BUILTIN_VIRTUAL_STREAM,
-              delay: layoutSlots.virtualDisplayDelay ?? 10,
-              startPause: layoutSlots.virtualDisplayStartPause ?? 4,
-              scrollSpeed: layoutSlots.virtualDisplayScrollSpeed ?? 28,
-              endPause: layoutSlots.virtualDisplayEndPause ?? 4,
-            },
-            ...streams.filter((stream) => !stream.type),
-          ],
-        }}
-        updateConfig={updateConfig}
-        accessRequestState={accessRequestState}
-        setAccessRequestState={setAccessRequestState}
-        deviceAccess={deviceAccess}
-        deviceRequest={deviceRequest}
-      />
-    </HashRouter>
-  );
-}
-
-function AppShell({
-  user,
-  permissions,
-  config,
-  updateConfig,
-  accessRequestState,
-  setAccessRequestState,
-  deviceAccess,
-  deviceRequest,
-}) {
-  const { pathname } = useLocation();
   const handleLogout = async () => {
-    if (user?.isAnonymous) {
-      rememberAnonymousAccount(auth, user, {
+    if (user?.isAnonymous && event?.id) {
+      rememberAnonymousAccount(auth, user, event.id, {
         email: deviceAccess?.email || deviceRequest?.email || user.email || '',
         roles: {
           tv: !!deviceAccess?.tv,
@@ -295,192 +444,240 @@ function AppShell({
     }
     await signOut(auth);
   };
-  const hasLightResultsAccess = !!(user?.isAnonymous && (deviceAccess?.results_start || deviceAccess?.results_finish));
-  const showNavbar = pathname !== ROUTES.chrono && !!user && user !== false && !!permissions;
 
-  if (hasLightResultsAccess && pathname !== ROUTES.chrono) {
-    return <Navigate to={ROUTES.chrono} replace />;
+  if (event === undefined || (user && user !== false && !user.isAnonymous && roles === null && !isGlobalEventAdministrator)) {
+    return (
+      <div className="app-loading">
+        <div className="login-spinner" />
+      </div>
+    );
   }
 
+  if (!event) {
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <h1 className="login-title">Événement introuvable</h1>
+          <p className="login-subtitle">
+            L’événement <strong>{eventSlug}</strong> n’existe pas ou n’est plus disponible.
+          </p>
+          <NavigateButton to={HOME_ROUTE} label="Retour à la home" />
+        </div>
+      </div>
+    );
+  }
+
+  const hasLightResultsAccess = !!(user?.isAnonymous && (deviceAccess?.results_start || deviceAccess?.results_finish));
+  const chronoPath = buildEventRoute(event.slug, 'chrono');
+  const displayPath = buildEventRoute(event.slug, 'display');
+  const showNavbar = pathname !== chronoPath && !!user && user !== false && !!permissions;
+
+  if (hasLightResultsAccess && pathname !== chronoPath) {
+    return <Navigate to={chronoPath} replace />;
+  }
+
+  const eventConfig = {
+    ...layoutSlots,
+    streams: [
+      {
+        ...BUILTIN_VIRTUAL_STREAM,
+        delay: layoutSlots.virtualDisplayDelay ?? 10,
+        startPause: layoutSlots.virtualDisplayStartPause ?? 4,
+        scrollSpeed: layoutSlots.virtualDisplayScrollSpeed ?? 28,
+        endPause: layoutSlots.virtualDisplayEndPause ?? 4,
+      },
+      ...streams.filter((stream) => !stream.type),
+    ],
+  };
+
   return (
-    <div className="app-root">
-      {showNavbar && (
-        <NavBar
-          user={user}
-          onLogout={handleLogout}
-          roles={permissions}
-          identityLabel={permissions?.identityLabel}
-          config={config}
-          onSelectConfiguration={(configurationId) => updateConfig((prev) => ({
-            ...prev,
-            activeConfigurationId: configurationId,
-          }))}
-        />
-      )}
-      <main className="app-main">
-        <Routes>
-          {LEGACY_ROUTE_REDIRECTS.map(({ from, to }) => (
-            <Route key={from} path={from} element={<Navigate to={to} replace />} />
-          ))}
-          <Route
-            path={ROUTES.display}
-            element={(
-              <RegularRoute
-                user={user}
-                permissions={permissions}
-                accessRequestState={accessRequestState}
-                setAccessRequestState={setAccessRequestState}
-                onLogout={handleLogout}
-                deviceAccess={deviceAccess}
-                deviceRequest={deviceRequest}
-              >
-                <DisplayPage config={config} />
-              </RegularRoute>
-            )}
+    <EventProvider value={{ event }}>
+      <div className="app-root">
+        {showNavbar && (
+          <NavBar
+            user={user}
+            onLogout={handleLogout}
+            roles={permissions}
+            identityLabel={permissions?.identityLabel}
+            config={eventConfig}
+            onSelectConfiguration={(configurationId) => updateConfig((prev) => ({
+              ...prev,
+              activeConfigurationId: configurationId,
+            }))}
           />
-          <Route
-            path={ROUTES.flow}
-            element={(
-              <RegularRoute
-                user={user}
-                permissions={permissions}
-                accessRequestState={accessRequestState}
-                setAccessRequestState={setAccessRequestState}
-                onLogout={handleLogout}
-                deviceAccess={deviceAccess}
-                deviceRequest={deviceRequest}
-              >
-                <ConfigPage config={config} onUpdate={updateConfig} />
-              </RegularRoute>
-            )}
-          />
-          <Route
-            path={ROUTES.flowAdmin}
-            element={(
-              <RegularRoute
-                user={user}
-                permissions={permissions}
-                requiredRole="streams_admin"
-                accessRequestState={accessRequestState}
-                setAccessRequestState={setAccessRequestState}
-                onLogout={handleLogout}
-                deviceAccess={deviceAccess}
-                deviceRequest={deviceRequest}
-              >
-                <AdminStreamsPage />
-              </RegularRoute>
-            )}
-          />
-          <Route
-            path={ROUTES.participants}
-            element={(
-              <RegularRoute
-                user={user}
-                permissions={permissions}
-                requiredRole="participants"
-                accessRequestState={accessRequestState}
-                setAccessRequestState={setAccessRequestState}
-                onLogout={handleLogout}
-                deviceAccess={deviceAccess}
-                deviceRequest={deviceRequest}
-              >
-                <ParticipantsPage canEdit={!!permissions?.participants} />
-              </RegularRoute>
-            )}
-          />
-          <Route
-            path={ROUTES.layouts}
-            element={(
-              <RegularRoute
-                user={user}
-                permissions={permissions}
-                accessRequestState={accessRequestState}
-                setAccessRequestState={setAccessRequestState}
-                onLogout={handleLogout}
-                deviceAccess={deviceAccess}
-                deviceRequest={deviceRequest}
-              >
-                <LayoutsPage currentLayoutId={config.layout} />
-              </RegularRoute>
-            )}
-          />
-          <Route
-            path={ROUTES.admin}
-            element={(
-              <RegularRoute
-                user={user}
-                permissions={permissions}
-                requiredRole="administration"
-                accessRequestState={accessRequestState}
-                setAccessRequestState={setAccessRequestState}
-                onLogout={handleLogout}
-                deviceAccess={deviceAccess}
-                deviceRequest={deviceRequest}
-              >
-                <AdminPage currentUser={user} />
-              </RegularRoute>
-            )}
-          />
-          <Route
-            path={ROUTES.results}
-            element={(
-              <RegularRoute
-                user={user}
-                permissions={permissions}
-                requiredRole="results_view"
-                accessRequestState={accessRequestState}
-                setAccessRequestState={setAccessRequestState}
-                onLogout={handleLogout}
-                deviceAccess={deviceAccess}
-                deviceRequest={deviceRequest}
-              >
-                <ResultsViewerPage />
-              </RegularRoute>
-            )}
-          />
-          <Route
-            path={ROUTES.runs}
-            element={(
-              <RegularRoute
-                user={user}
-                permissions={permissions}
-                requiredRole="administration"
-                accessRequestState={accessRequestState}
-                setAccessRequestState={setAccessRequestState}
-                onLogout={handleLogout}
-                deviceAccess={deviceAccess}
-                deviceRequest={deviceRequest}
-              >
-                <ResultsRunsPage currentUser={user} />
-              </RegularRoute>
-            )}
-          />
-          <Route
-            path={ROUTES.archives}
-            element={(
-              <RegularRoute
-                user={user}
-                permissions={permissions}
-                requiredRole="administration"
-                accessRequestState={accessRequestState}
-                setAccessRequestState={setAccessRequestState}
-                onLogout={handleLogout}
-                deviceAccess={deviceAccess}
-                deviceRequest={deviceRequest}
-              >
-                <ResultsArchivePage />
-              </RegularRoute>
-            )}
-          />
-          <Route path={ROUTES.chrono} element={<ResultsPage user={user} onLogout={handleLogout} />} />
-          <Route path="*" element={<Navigate to={ROUTES.display} replace />} />
-        </Routes>
-      </main>
-    </div>
+        )}
+        <main className="app-main">
+          <Routes>
+            <Route
+              path="tv/affichage"
+              element={(
+                <RegularEventRoute
+                  event={event}
+                  user={user}
+                  permissions={permissions}
+                  accessRequestState={accessRequestState}
+                  setAccessRequestState={setAccessRequestState}
+                  onLogout={handleLogout}
+                  deviceAccess={deviceAccess}
+                  deviceRequest={deviceRequest}
+                >
+                  <DisplayPage config={eventConfig} />
+                </RegularEventRoute>
+              )}
+            />
+            <Route
+              path="tv/flow"
+              element={(
+                <RegularEventRoute
+                  event={event}
+                  user={user}
+                  permissions={permissions}
+                  accessRequestState={accessRequestState}
+                  setAccessRequestState={setAccessRequestState}
+                  onLogout={handleLogout}
+                  deviceAccess={deviceAccess}
+                  deviceRequest={deviceRequest}
+                >
+                  <ConfigPage config={eventConfig} onUpdate={updateConfig} />
+                </RegularEventRoute>
+              )}
+            />
+            <Route
+              path="tv/flow-admin"
+              element={(
+                <RegularEventRoute
+                  event={event}
+                  user={user}
+                  permissions={permissions}
+                  requiredRole="streams_admin"
+                  accessRequestState={accessRequestState}
+                  setAccessRequestState={setAccessRequestState}
+                  onLogout={handleLogout}
+                  deviceAccess={deviceAccess}
+                  deviceRequest={deviceRequest}
+                >
+                  <AdminStreamsPage />
+                </RegularEventRoute>
+              )}
+            />
+            <Route
+              path="tv/participants"
+              element={(
+                <RegularEventRoute
+                  event={event}
+                  user={user}
+                  permissions={permissions}
+                  requiredRole="participants"
+                  accessRequestState={accessRequestState}
+                  setAccessRequestState={setAccessRequestState}
+                  onLogout={handleLogout}
+                  deviceAccess={deviceAccess}
+                  deviceRequest={deviceRequest}
+                >
+                  <ParticipantsPage canEdit={!!permissions?.participants} />
+                </RegularEventRoute>
+              )}
+            />
+            <Route
+              path="tv/layouts"
+              element={(
+                <RegularEventRoute
+                  event={event}
+                  user={user}
+                  permissions={permissions}
+                  accessRequestState={accessRequestState}
+                  setAccessRequestState={setAccessRequestState}
+                  onLogout={handleLogout}
+                  deviceAccess={deviceAccess}
+                  deviceRequest={deviceRequest}
+                >
+                  <LayoutsPage currentLayoutId={eventConfig.layout} />
+                </RegularEventRoute>
+              )}
+            />
+            <Route
+              path="tv/admin"
+              element={(
+                <RegularEventRoute
+                  event={event}
+                  user={user}
+                  permissions={permissions}
+                  requiredRole="administration"
+                  accessRequestState={accessRequestState}
+                  setAccessRequestState={setAccessRequestState}
+                  onLogout={handleLogout}
+                  deviceAccess={deviceAccess}
+                  deviceRequest={deviceRequest}
+                >
+                  <AdminPage currentUser={user} />
+                </RegularEventRoute>
+              )}
+            />
+            <Route
+              path="tv/resultats"
+              element={(
+                <RegularEventRoute
+                  event={event}
+                  user={user}
+                  permissions={permissions}
+                  requiredRole="results_view"
+                  accessRequestState={accessRequestState}
+                  setAccessRequestState={setAccessRequestState}
+                  onLogout={handleLogout}
+                  deviceAccess={deviceAccess}
+                  deviceRequest={deviceRequest}
+                >
+                  <ResultsViewerPage />
+                </RegularEventRoute>
+              )}
+            />
+            <Route
+              path="tv/runs"
+              element={(
+                <RegularEventRoute
+                  event={event}
+                  user={user}
+                  permissions={permissions}
+                  requiredRole="administration"
+                  accessRequestState={accessRequestState}
+                  setAccessRequestState={setAccessRequestState}
+                  onLogout={handleLogout}
+                  deviceAccess={deviceAccess}
+                  deviceRequest={deviceRequest}
+                >
+                  <ResultsRunsPage currentUser={user} />
+                </RegularEventRoute>
+              )}
+            />
+            <Route
+              path="tv/archives"
+              element={(
+                <RegularEventRoute
+                  event={event}
+                  user={user}
+                  permissions={permissions}
+                  requiredRole="administration"
+                  accessRequestState={accessRequestState}
+                  setAccessRequestState={setAccessRequestState}
+                  onLogout={handleLogout}
+                  deviceAccess={deviceAccess}
+                  deviceRequest={deviceRequest}
+                >
+                  <ResultsArchivePage />
+                </RegularEventRoute>
+              )}
+            />
+            <Route path="chrono" element={<ResultsPage user={user} onLogout={handleLogout} />} />
+            <Route path="*" element={<Navigate to={displayPath} replace />} />
+          </Routes>
+        </main>
+      </div>
+    </EventProvider>
   );
 }
 
-function RegularRoute({
+function RegularEventRoute({
+  event,
   user,
   permissions,
   requiredRole,
@@ -500,25 +697,18 @@ function RegularRoute({
   }
 
   if (!permissions) {
-    log.warn('regular route denied, no permissions', {
-      user: user?.email,
-      accessRequestState,
-      requiredRole,
-    });
     return (
       <DeniedAccessCard
+        event={event}
         user={user}
         requestState={accessRequestState}
         onLogout={onLogout}
         onRequestAccess={async () => {
-          log.info('requesting google access', { email: user.email });
           setAccessRequestState('sending');
           try {
-            await requestAccess(user);
-            log.info('google access request sent', { email: user.email });
+            await requestAccess(event.id, user);
             setAccessRequestState('sent');
-          } catch (error) {
-            log.error('google access request failed', { email: user.email, error });
+          } catch {
             setAccessRequestState('error');
           }
         }}
@@ -527,12 +717,7 @@ function RegularRoute({
   }
 
   if (requiredRole && !permissions[requiredRole]) {
-    log.warn('regular route missing role', {
-      email: user?.email,
-      requiredRole,
-      permissions,
-    });
-    return <Navigate to={ROUTES.display} replace />;
+    return <Navigate to={buildEventRoute(event.slug, 'display')} replace />;
   }
 
   return children;
@@ -542,7 +727,7 @@ function hasGoogleProvider(user) {
   return user?.providerData?.some((provider) => provider.providerId === 'google.com') ?? false;
 }
 
-function DeniedAccessCard({ user, requestState, onLogout, onRequestAccess }) {
+function DeniedAccessCard({ event, user, requestState, onLogout, onRequestAccess }) {
   return (
     <div className="login-page">
       <div className="login-card">
@@ -556,7 +741,7 @@ function DeniedAccessCard({ user, requestState, onLogout, onRequestAccess }) {
         <h1 className="login-title">Accès refusé</h1>
         <p className="login-subtitle">
           L&apos;adresse <strong className="login-email">{user.email}</strong> n&apos;est pas
-          autorisée à accéder à cette application.
+          autorisée sur l&apos;événement <strong>{event.title}</strong>.
         </p>
         {requestState === 'sent' && (
           <div className="admin-feedback">
@@ -582,5 +767,13 @@ function DeniedAccessCard({ user, requestState, onLogout, onRequestAccess }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function NavigateButton({ to, label }) {
+  return (
+    <a className="btn btn-primary login-btn" href={`#${to}`}>
+      {label}
+    </a>
   );
 }

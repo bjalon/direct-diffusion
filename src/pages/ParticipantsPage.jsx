@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
+import { useEventContext } from '../context/EventContext';
 import {
   subscribeParticipants, addParticipant, updateParticipant, deleteParticipant, reorderParticipants,
 } from '../firebase/participants';
 
 export default function ParticipantsPage({ canEdit = false }) {
+  const { event } = useEventContext();
   const [participants, setParticipants] = useState([]);
   const [newLabel, setNewLabel] = useState('');
   const [adding, setAdding] = useState(false);
@@ -13,7 +15,7 @@ export default function ParticipantsPage({ canEdit = false }) {
   const dragOriginRef = useRef([]);
   const dragDidDropRef = useRef(false);
 
-  useEffect(() => subscribeParticipants(setParticipants), []);
+  useEffect(() => subscribeParticipants(event.id, setParticipants), [event.id]);
   useEffect(() => {
     participantsRef.current = participants;
   }, [participants]);
@@ -23,7 +25,7 @@ export default function ParticipantsPage({ canEdit = false }) {
     const label = newLabel.trim();
     if (!label) return;
     const maxOrder = participants.reduce((m, p) => Math.max(m, p.order ?? 0), 0);
-    await addParticipant(label, maxOrder + 1);
+    await addParticipant(event.id, label, maxOrder + 1);
     setNewLabel('');
     setAdding(false);
   };
@@ -38,7 +40,7 @@ export default function ParticipantsPage({ canEdit = false }) {
 
     setIsSavingOrder(true);
     try {
-      await reorderParticipants(orderedParticipants.map((participant) => participant.id));
+      await reorderParticipants(event.id, orderedParticipants.map((participant) => participant.id));
     } catch {
       if (dragOriginRef.current.length > 0) {
         setParticipants(dragOriginRef.current);
@@ -104,6 +106,7 @@ export default function ParticipantsPage({ canEdit = false }) {
           {participants.map((p) => (
             <ParticipantRow
               key={p.id}
+              eventId={event.id}
               participant={p}
               canEdit={canEdit}
               isDragging={draggedParticipantId === p.id}
@@ -169,6 +172,7 @@ function moveParticipant(participants, draggedParticipantId, targetParticipantId
 }
 
 function ParticipantRow({
+  eventId,
   participant,
   canEdit,
   isDragging,
@@ -190,7 +194,7 @@ function ParticipantRow({
     if (!canEdit) return;
     const trimmed = label.trim();
     if (trimmed && trimmed !== participant.label) {
-      updateParticipant(participant.id, { label: trimmed });
+      updateParticipant(eventId, participant.id, { label: trimmed });
     } else {
       setLabel(participant.label);
     }
@@ -200,7 +204,7 @@ function ParticipantRow({
     if (!canEdit) return;
     const n = Number(order);
     if (!isNaN(n) && n !== participant.order) {
-      updateParticipant(participant.id, { order: n });
+      updateParticipant(eventId, participant.id, { order: n });
     }
   };
 
@@ -209,7 +213,7 @@ function ParticipantRow({
     const nextActive = !active;
     setActive(nextActive);
     try {
-      await updateParticipant(participant.id, { active: nextActive });
+      await updateParticipant(eventId, participant.id, { active: nextActive });
     } catch {
       setActive(participant.active !== false);
     }
@@ -268,7 +272,7 @@ function ParticipantRow({
       {canEdit && (
         <button
           className="btn btn-danger btn-sm"
-          onClick={() => deleteParticipant(participant.id)}
+          onClick={() => deleteParticipant(eventId, participant.id)}
           disabled={disableActions}
         >
           Supprimer

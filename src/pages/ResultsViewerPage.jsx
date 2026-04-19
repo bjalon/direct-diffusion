@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEventContext } from '../context/EventContext';
 import { subscribeCurrentCompetitor, subscribeResultEvents, subscribeStation } from '../firebase/results';
 import { deriveFinishedCourses, deriveGeneralRanking } from '../utils/resultsDerivation';
 
@@ -15,6 +16,7 @@ const AUTO_SCROLL_LABELS = {
 };
 
 export default function ResultsViewerPage() {
+  const { event } = useEventContext();
   const [events, setEvents] = useState([]);
   const [currentCompetitor, setCurrentCompetitor] = useState(null);
   const [startStation, setStartStation] = useState(null);
@@ -28,9 +30,9 @@ export default function ResultsViewerPage() {
   const rafRef = useRef(0);
   const lastTsRef = useRef(0);
 
-  useEffect(() => subscribeResultEvents(setEvents), []);
-  useEffect(() => subscribeCurrentCompetitor(setCurrentCompetitor), []);
-  useEffect(() => subscribeStation('start', setStartStation), []);
+  useEffect(() => subscribeResultEvents(event.id, setEvents), [event.id]);
+  useEffect(() => subscribeCurrentCompetitor(event.id, setCurrentCompetitor), [event.id]);
+  useEffect(() => subscribeStation(event.id, 'start', setStartStation), [event.id]);
 
   const finishedCourses = useMemo(() => deriveFinishedCourses(events), [events]);
   const competitionRuns = useMemo(() => deriveGeneralRanking(events), [events]);

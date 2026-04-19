@@ -2,14 +2,16 @@ import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { eventSubcollection, eventSubdoc } from './eventRefs';
 import { createLogger } from '../utils/logger';
 
-const COLL = () => collection(db, 'participants');
 const log = createLogger('firebase/participants');
 
-export function subscribeParticipants(onData) {
+const COLL = (eventId) => eventSubcollection(eventId, 'participants');
+
+export function subscribeParticipants(eventId, onData) {
   return onSnapshot(
-    query(COLL(), orderBy('order', 'asc')),
+    query(COLL(eventId), orderBy('order', 'asc')),
     (snap) => {
       const participants = snap.docs.map((d) => {
         const data = d.data();
@@ -19,34 +21,34 @@ export function subscribeParticipants(onData) {
           active: data.active !== false,
         };
       });
-      log.debug('participants snapshot', { count: participants.length });
+      log.debug('participants snapshot', { eventId, count: participants.length });
       onData(participants);
     },
     (error) => {
-      log.error('participants subscription failed', error);
+      log.error('participants subscription failed', { eventId, error });
     },
   );
 }
 
-export const addParticipant = (label, order) =>
-  (log.info('addParticipant', { label, order }), addDoc(COLL(), { label, order, active: true }));
+export const addParticipant = (eventId, label, order) =>
+  (log.info('addParticipant', { eventId, label, order }), addDoc(COLL(eventId), { label, order, active: true }));
 
-export const updateParticipant = (id, data) =>
-  (log.info('updateParticipant', { id, data }), updateDoc(doc(db, 'participants', id), data));
+export const updateParticipant = (eventId, id, data) =>
+  (log.info('updateParticipant', { eventId, id, data }), updateDoc(eventSubdoc(eventId, 'participants', id), data));
 
-export const deleteParticipant = (id) =>
-  (log.info('deleteParticipant', { id }), deleteDoc(doc(db, 'participants', id)));
+export const deleteParticipant = (eventId, id) =>
+  (log.info('deleteParticipant', { eventId, id }), deleteDoc(eventSubdoc(eventId, 'participants', id)));
 
-export async function reorderParticipants(participantIds) {
+export async function reorderParticipants(eventId, participantIds) {
   if (!Array.isArray(participantIds) || participantIds.length === 0) {
     return;
   }
 
-  log.info('reorderParticipants', { count: participantIds.length });
+  log.info('reorderParticipants', { eventId, count: participantIds.length });
   const batch = writeBatch(db);
 
   participantIds.forEach((participantId, index) => {
-    batch.update(doc(db, 'participants', participantId), { order: index + 1 });
+    batch.update(eventSubdoc(eventId, 'participants', participantId), { order: index + 1 });
   });
 
   await batch.commit();

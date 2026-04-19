@@ -20,55 +20,77 @@ service cloud.firestore {
              && request.auth.token.firebase.sign_in_provider == 'google.com';
     }
 
-    function isAllowedUser() {
+    function isGlobalAllowedUser() {
       return hasEmail()
              && exists(/databases/$(database)/documents/allowedUsers/$(authEmail()));
     }
 
-    function userRoles() {
+    function globalRoles() {
       return get(/databases/$(database)/documents/allowedUsers/$(authEmail())).data;
     }
 
-    function hasRole(role) {
-      return isAllowedUser() && userRoles().get(role, false) == true;
+    function hasGlobalRole(role) {
+      return isGlobalAllowedUser() && globalRoles().get(role, false) == true;
     }
 
-    function isAdministration() {
-      return hasRole('administration') && isGoogleUser();
+    function isEventsAdministration() {
+      return hasGlobalRole('admin_events') && isGoogleUser();
     }
 
-    function isAdminFlux() {
-      return hasRole('admin_flux') && isGoogleUser();
+    function isEventAllowedUser(eventId) {
+      return hasEmail()
+             && exists(/databases/$(database)/documents/events/$(eventId)/allowedUsers/$(authEmail()));
     }
 
-    function isParticipants() {
-      return hasRole('participants') && isGoogleUser();
+    function eventUserRoles(eventId) {
+      return get(/databases/$(database)/documents/events/$(eventId)/allowedUsers/$(authEmail())).data;
     }
 
-    function hasResultUser() {
+    function hasEventRole(eventId, role) {
+      return isEventAllowedUser(eventId) && eventUserRoles(eventId).get(role, false) == true;
+    }
+
+    function isEventAdministration(eventId) {
+      return isEventsAdministration()
+             || (hasEventRole(eventId, 'administration') && isGoogleUser());
+    }
+
+    function isEventAdminFlux(eventId) {
+      return hasEventRole(eventId, 'admin_flux') && isGoogleUser();
+    }
+
+    function isEventParticipants(eventId) {
+      return hasEventRole(eventId, 'participants') && isGoogleUser();
+    }
+
+    function canReadProtectedEventData(eventId) {
+      return isEventAdministration(eventId) || isEventAllowedUser(eventId);
+    }
+
+    function hasResultUser(eventId) {
       return isAuthenticated()
-             && exists(/databases/$(database)/documents/allowedResultUsers/$(request.auth.uid));
+             && exists(/databases/$(database)/documents/events/$(eventId)/allowedResultUsers/$(request.auth.uid));
     }
 
-    function resultRoles() {
-      return get(/databases/$(database)/documents/allowedResultUsers/$(request.auth.uid)).data;
+    function resultRoles(eventId) {
+      return get(/databases/$(database)/documents/events/$(eventId)/allowedResultUsers/$(request.auth.uid)).data;
     }
 
-    function hasResultRole(role) {
-      return hasResultUser() && resultRoles().get(role, false) == true;
+    function hasResultRole(eventId, role) {
+      return hasResultUser(eventId) && resultRoles(eventId).get(role, false) == true;
     }
 
-    function hasGrantedResultAccess() {
-      return hasResultRole('results_start') || hasResultRole('results_finish');
+    function hasGrantedResultAccess(eventId) {
+      return hasResultRole(eventId, 'results_start') || hasResultRole(eventId, 'results_finish');
     }
 
-    function hasTvAccess() {
-      return hasResultRole('tv');
+    function hasTvAccess(eventId) {
+      return hasResultRole(eventId, 'tv');
     }
 
-    function canManageStation(stationId) {
-      return (stationId == 'start' && hasResultRole('results_start'))
-             || (stationId == 'finish' && hasResultRole('results_finish'));
+    function canManageStation(eventId, stationId) {
+      return (stationId == 'start' && hasResultRole(eventId, 'results_start'))
+             || (stationId == 'finish' && hasResultRole(eventId, 'results_finish'));
     }
 
     function currentStationDocId(stationId) {
@@ -79,27 +101,30 @@ service cloud.firestore {
           : '__invalid__';
     }
 
-    function currentStationExists(docId) {
-      return exists(/databases/$(database)/documents/currentStations/$(docId));
+    function currentStationPath(eventId, docId) {
+      return /databases/$(database)/documents/events/$(eventId)/currentStations/$(docId);
     }
 
-    function currentStationOwnedByRequester(docId) {
-      return currentStationExists(docId)
-             && get(/databases/$(database)/documents/currentStations/$(docId)).data.assignedUid == request.auth.uid;
+    function currentStationExists(eventId, docId) {
+      return exists(currentStationPath(eventId, docId));
     }
 
-    function ownsCurrentStation(stationId) {
-      return currentStationOwnedByRequester(currentStationDocId(stationId));
+    function currentStationOwnedByRequester(eventId, docId) {
+      return currentStationExists(eventId, docId)
+             && get(currentStationPath(eventId, docId)).data.assignedUid == request.auth.uid;
     }
 
-    function canReadCurrentStation(docId) {
-      return isAdministration()
-             || currentStationMatchesRole(docId);
+    function ownsCurrentStation(eventId, stationId) {
+      return currentStationOwnedByRequester(eventId, currentStationDocId(stationId));
     }
 
-    function currentStationMatchesRole(docId) {
-      return (docId == 'currentStart' && hasResultRole('results_start'))
-             || (docId == 'currentFinish' && hasResultRole('results_finish'));
+    function currentStationMatchesRole(eventId, docId) {
+      return (docId == 'currentStart' && hasResultRole(eventId, 'results_start'))
+             || (docId == 'currentFinish' && hasResultRole(eventId, 'results_finish'));
+    }
+
+    function canReadCurrentStation(eventId, docId) {
+      return isEventAdministration(eventId) || currentStationMatchesRole(eventId, docId);
     }
 
     function validCurrentStationPayload(docId) {
@@ -113,88 +138,93 @@ service cloud.firestore {
              );
     }
 
-    function canClaimCurrentStation(docId) {
-      return currentStationMatchesRole(docId)
+    function canClaimCurrentStation(eventId, docId) {
+      return currentStationMatchesRole(eventId, docId)
              && validCurrentStationPayload(docId)
-             && (!currentStationExists(docId) || currentStationOwnedByRequester(docId));
+             && (!currentStationExists(eventId, docId) || currentStationOwnedByRequester(eventId, docId));
     }
 
-    function canCreateResultEvent() {
+    function currentCompetitorPath(eventId) {
+      return /databases/$(database)/documents/events/$(eventId)/currentCompetitor/current;
+    }
+
+    function currentCompetitorExists(eventId) {
+      return exists(currentCompetitorPath(eventId));
+    }
+
+    function currentCompetitorData(eventId) {
+      return get(currentCompetitorPath(eventId)).data;
+    }
+
+    function currentCompetitorMatchesRequest(eventId) {
+      return currentCompetitorExists(eventId)
+             && request.resource.data.runId == currentCompetitorData(eventId).runId
+             && request.resource.data.startId == currentCompetitorData(eventId).startId;
+    }
+
+    function hasLocalStartForCurrentCompetitor(eventId) {
+      return currentCompetitorExists(eventId)
+             && currentCompetitorData(eventId).latestStartAtClientMs != null
+             && currentCompetitorData(eventId).latestStartClickId != null;
+    }
+
+    function canFinishCurrentCompetitor(eventId) {
+      return currentCompetitorMatchesRequest(eventId)
+             && hasLocalStartForCurrentCompetitor(eventId);
+    }
+
+    function canAbandonCurrentCompetitor(eventId) {
+      return canFinishCurrentCompetitor(eventId)
+             && currentCompetitorData(eventId).status == 'running';
+    }
+
+    function canRecoverStartEventFromFinish(eventId) {
+      return ownsCurrentStation(eventId, 'finish')
+             && currentCompetitorExists(eventId)
+             && request.resource.data.clickId == currentCompetitorData(eventId).latestStartClickId
+             && canFinishCurrentCompetitor(eventId);
+    }
+
+    function canCreateResultEvent(eventId) {
       return (
                request.resource.data.type == 'start'
                && request.resource.data.station == 'start'
-               && canRecoverStartEventFromFinish()
-               && request.resource.data.actorUid == currentCompetitorData().selectedByUid
+               && canRecoverStartEventFromFinish(eventId)
+               && request.resource.data.actorUid == currentCompetitorData(eventId).selectedByUid
              )
              || (
                request.resource.data.actorUid == request.auth.uid
                && (
                  (request.resource.data.type == 'start'
                   && request.resource.data.station == 'start'
-                  && ownsCurrentStation('start'))
+                  && ownsCurrentStation(eventId, 'start'))
                  || (request.resource.data.type == 'finish'
                      && request.resource.data.station == 'finish'
-                     && ownsCurrentStation('finish')
-                     && canFinishCurrentCompetitor())
+                     && ownsCurrentStation(eventId, 'finish')
+                     && canFinishCurrentCompetitor(eventId))
                  || (request.resource.data.type == 'abandon'
                      && request.resource.data.station == 'finish'
-                     && ownsCurrentStation('finish')
-                     && canAbandonCurrentCompetitor())
+                     && ownsCurrentStation(eventId, 'finish')
+                     && canAbandonCurrentCompetitor(eventId))
                )
              );
     }
 
-    function canCreateResultRun() {
-      return ownsCurrentStation('start');
+    function canCreateResultRun(eventId) {
+      return ownsCurrentStation(eventId, 'start');
     }
 
-    function canUpdateResultRun() {
-      return ownsCurrentStation('start') || canUpdateResultRunFromFinish();
-    }
-
-    function currentCompetitorExists() {
-      return exists(/databases/$(database)/documents/currentCompetitor/current);
-    }
-
-    function currentCompetitorData() {
-      return get(/databases/$(database)/documents/currentCompetitor/current).data;
-    }
-
-    function currentCompetitorMatchesRequest() {
-      return currentCompetitorExists()
-             && request.resource.data.runId == currentCompetitorData().runId
-             && request.resource.data.startId == currentCompetitorData().startId;
-    }
-
-    function hasLocalStartForCurrentCompetitor() {
-      return currentCompetitorExists()
-             && currentCompetitorData().latestStartAtClientMs != null
-             && currentCompetitorData().latestStartClickId != null;
-    }
-
-    function canFinishCurrentCompetitor() {
-      return currentCompetitorMatchesRequest()
-             && hasLocalStartForCurrentCompetitor();
-    }
-
-    function canAbandonCurrentCompetitor() {
-      return canFinishCurrentCompetitor()
-             && currentCompetitorData().status == 'running';
-    }
-
-    function canRecoverStartEventFromFinish() {
-      return ownsCurrentStation('finish')
-             && currentCompetitorExists()
-             && request.resource.data.clickId == currentCompetitorData().latestStartClickId
-             && canFinishCurrentCompetitor();
-    }
-
-    function canUpdateResultRunFromFinish() {
-      return ownsCurrentStation('finish')
+    function canUpdateResultRunFromFinish(eventId) {
+      return ownsCurrentStation(eventId, 'finish')
              && (
-               (request.resource.data.status == 'finished' && canFinishCurrentCompetitor())
-               || (request.resource.data.status == 'abandoned' && canAbandonCurrentCompetitor())
+               (request.resource.data.status == 'finished' && canFinishCurrentCompetitor(eventId))
+               || (request.resource.data.status == 'abandoned' && canAbandonCurrentCompetitor(eventId))
              );
+    }
+
+    function canUpdateResultRun(eventId) {
+      return ownsCurrentStation(eventId, 'start')
+             || canUpdateResultRunFromFinish(eventId);
     }
 
     function hasOnlyTvRole(data) {
@@ -213,101 +243,107 @@ service cloud.firestore {
 
     match /allowedUsers/{email} {
       allow get: if hasEmail() && email == authEmail();
-      allow list: if isAdministration();
-      allow create, update, delete: if isAdministration();
+      allow list: if isEventsAdministration();
+      allow create, update, delete: if isEventsAdministration();
     }
 
-    match /accessRequests/{email} {
-      allow create, update: if hasEmail()
-                            && email == authEmail()
-                            && request.resource.data.email == authEmail()
-                            && request.resource.data.status == 'pending';
-      allow get: if isAdministration() || (hasEmail() && email == authEmail());
-      allow list: if isAdministration();
-      allow update, delete: if isAdministration();
-    }
+    match /events/{eventId} {
+      allow read: if isEventsAdministration()
+                  || resource.data.published == true
+                  || isEventAllowedUser(eventId)
+                  || hasResultUser(eventId);
+      allow create, update, delete: if isEventsAdministration();
 
-    match /allowedResultUsers/{uid} {
-      allow get: if isAdministration() || (isAuthenticated() && uid == request.auth.uid);
-      allow list: if isAdministration();
-      allow create, update: if isAdministration() && validLightRoleCombination(request.resource.data);
-      allow delete: if isAdministration();
-    }
+      match /allowedUsers/{email} {
+        allow get: if isEventsAdministration() || isEventAdministration(eventId) || (hasEmail() && email == authEmail());
+        allow list: if isEventsAdministration() || isEventAdministration(eventId);
+        allow create, update, delete: if isEventsAdministration() || isEventAdministration(eventId);
+      }
 
-    match /resultAccessRequests/{uid} {
-      allow create: if (isAuthenticated()
-                        && uid == request.auth.uid
-                        && request.resource.data.uid == request.auth.uid
-                        && request.resource.data.status == 'pending')
-                    || isAdministration();
-      allow update: if (isAuthenticated()
-                        && uid == request.auth.uid
-                        && request.resource.data.uid == request.auth.uid
-                        && request.resource.data.status == 'pending')
-                    || isAdministration();
-      allow get: if isAdministration() || (isAuthenticated() && uid == request.auth.uid);
-      allow list: if isAdministration();
-      allow delete: if isAdministration();
-    }
+      match /accessRequests/{email} {
+        allow create, update: if hasEmail()
+                              && email == authEmail()
+                              && request.resource.data.email == authEmail()
+                              && request.resource.data.status == 'pending';
+        allow get: if isEventsAdministration() || isEventAdministration(eventId) || (hasEmail() && email == authEmail());
+        allow list: if isEventsAdministration() || isEventAdministration(eventId);
+        allow update, delete: if isEventsAdministration() || isEventAdministration(eventId);
+      }
 
-    match /resultStations/{stationId} {
-      allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
-      allow create, update: if isAdministration() || (canManageStation(stationId) && ownsCurrentStation(stationId));
-      allow delete: if isAdministration();
-    }
+      match /allowedResultUsers/{uid} {
+        allow get: if isEventAdministration(eventId) || (isAuthenticated() && uid == request.auth.uid);
+        allow list: if isEventAdministration(eventId);
+        allow create, update: if isEventAdministration(eventId) && validLightRoleCombination(request.resource.data);
+        allow delete: if isEventAdministration(eventId);
+      }
 
-    match /currentStations/{docId} {
-      allow get: if canReadCurrentStation(docId);
-      allow list: if isAdministration();
-      allow create, update: if isAdministration() || canClaimCurrentStation(docId);
-      allow delete: if isAdministration() || currentStationOwnedByRequester(docId);
-    }
+      match /resultAccessRequests/{uid} {
+        allow create: if (isAuthenticated()
+                          && uid == request.auth.uid
+                          && request.resource.data.uid == request.auth.uid
+                          && request.resource.data.status == 'pending')
+                      || isEventAdministration(eventId);
+        allow update: if (isAuthenticated()
+                          && uid == request.auth.uid
+                          && request.resource.data.uid == request.auth.uid
+                          && request.resource.data.status == 'pending')
+                      || isEventAdministration(eventId);
+        allow get: if isEventAdministration(eventId) || (isAuthenticated() && uid == request.auth.uid);
+        allow list: if isEventAdministration(eventId);
+        allow delete: if isEventAdministration(eventId);
+      }
 
-    match /currentCompetitor/{docId} {
-      allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
-      allow create, update: if isAdministration()
-                            || (docId == 'current'
-                                && hasResultRole('results_start')
-                                && ownsCurrentStation('start'));
-      allow delete: if isAdministration()
-                    || (docId == 'current'
-                        && ((hasResultRole('results_start') && ownsCurrentStation('start'))
-                            || (hasResultRole('results_finish') && ownsCurrentStation('finish'))));
-    }
+      match /resultStations/{stationId} {
+        allow read: if isEventAdministration(eventId) || hasGrantedResultAccess(eventId) || hasTvAccess(eventId);
+        allow create, update: if isEventAdministration(eventId) || (canManageStation(eventId, stationId) && ownsCurrentStation(eventId, stationId));
+        allow delete: if isEventAdministration(eventId);
+      }
 
-    match /resultEvents/{eventId} {
-      allow read: if isAdministration() || hasGrantedResultAccess() || hasTvAccess();
-      allow create: if isAdministration() || canCreateResultEvent();
-      allow update: if isAdministration();
-      allow delete: if isAdministration();
-    }
+      match /currentStations/{docId} {
+        allow get: if canReadCurrentStation(eventId, docId);
+        allow list: if isEventAdministration(eventId);
+        allow create, update: if isEventAdministration(eventId) || canClaimCurrentStation(eventId, docId);
+        allow delete: if isEventAdministration(eventId) || currentStationOwnedByRequester(eventId, docId);
+      }
 
-    match /resultRuns/{runId} {
-      allow read: if isAllowedUser() || hasGrantedResultAccess() || hasTvAccess();
-      allow create: if isAdministration() || canCreateResultRun();
-      allow update: if isAdministration() || canUpdateResultRun();
-      allow delete: if isAdministration();
-    }
+      match /currentCompetitor/{docId} {
+        allow read: if isEventAdministration(eventId) || hasGrantedResultAccess(eventId) || hasTvAccess(eventId);
+        allow create, update: if isEventAdministration(eventId)
+                              || (docId == 'current'
+                                  && hasResultRole(eventId, 'results_start')
+                                  && ownsCurrentStation(eventId, 'start'));
+        allow delete: if isEventAdministration(eventId)
+                      || (docId == 'current'
+                          && ((hasResultRole(eventId, 'results_start') && ownsCurrentStation(eventId, 'start'))
+                              || (hasResultRole(eventId, 'results_finish') && ownsCurrentStation(eventId, 'finish'))));
+      }
 
-    match /clockChecks/{uid} {
-      allow read, write: if isAuthenticated() && uid == request.auth.uid;
-    }
+      match /resultEvents/{eventDocId} {
+        allow read: if isEventAdministration(eventId) || hasGrantedResultAccess(eventId) || hasTvAccess(eventId);
+        allow create: if canCreateResultEvent(eventId);
+        allow update: if isEventAdministration(eventId);
+        allow delete: if isEventAdministration(eventId);
+      }
 
-    match /config/streams {
-      allow read: if isAllowedUser() || hasTvAccess();
-      allow write: if isAdminFlux() || isAdministration();
-    }
+      match /resultRuns/{runId} {
+        allow read: if canReadProtectedEventData(eventId) || hasGrantedResultAccess(eventId) || hasTvAccess(eventId);
+        allow create: if canCreateResultRun(eventId);
+        allow update: if canUpdateResultRun(eventId);
+        allow delete: if isEventAdministration(eventId);
+      }
 
-    match /participants/{participantId} {
-      allow read: if isAllowedUser() || hasGrantedResultAccess();
-      allow write: if isParticipants() || isAdministration();
-    }
+      match /clockChecks/{uid} {
+        allow read, write: if isAuthenticated() && uid == request.auth.uid;
+      }
 
-    match /races/{raceId} {
-      allow read, write: if false;
+      match /config/{docId} {
+        allow read: if canReadProtectedEventData(eventId) || hasTvAccess(eventId);
+        allow write: if isEventAdminFlux(eventId) || isEventAdministration(eventId);
+      }
 
-      match /results/{resultId} {
-        allow read, write: if false;
+      match /participants/{participantId} {
+        allow read: if canReadProtectedEventData(eventId) || hasGrantedResultAccess(eventId);
+        allow write: if isEventParticipants(eventId) || isEventAdministration(eventId);
       }
     }
   }

@@ -10,11 +10,12 @@ function canUseStorage() {
   return typeof window !== 'undefined' && typeof localStorage !== 'undefined';
 }
 
-function buildScope(auth) {
+function buildScope(auth, eventId = 'global') {
   return JSON.stringify({
     appName: auth?.name || '',
     apiKey: auth?.config?.apiKey || '',
     projectId: auth?.app?.options?.projectId || '',
+    eventId: eventId || 'global',
   });
 }
 
@@ -64,8 +65,8 @@ function normalizeEntry(entry) {
   };
 }
 
-function readEntries(auth) {
-  const scope = buildScope(auth);
+function readEntries(auth, eventId) {
+  const scope = buildScope(auth, eventId);
   const store = readStore();
   const rawEntries = Array.isArray(store[scope]) ? store[scope] : [];
 
@@ -75,22 +76,22 @@ function readEntries(auth) {
     .sort((a, b) => (b.lastUsedAt || '').localeCompare(a.lastUsedAt || ''));
 }
 
-function writeEntries(auth, entries) {
-  const scope = buildScope(auth);
+function writeEntries(auth, eventId, entries) {
+  const scope = buildScope(auth, eventId);
   const store = readStore();
   store[scope] = entries.slice(0, MAX_ACCOUNTS);
   writeStore(store);
 }
 
-export function listAnonymousAccounts(auth) {
-  return readEntries(auth);
+export function listAnonymousAccounts(auth, eventId) {
+  return readEntries(auth, eventId);
 }
 
-export function rememberAnonymousAccount(auth, user, metadata = {}) {
+export function rememberAnonymousAccount(auth, user, eventId, metadata = {}) {
   if (!user?.isAnonymous) return;
 
   const now = new Date().toISOString();
-  const entries = readEntries(auth);
+  const entries = readEntries(auth, eventId);
   const existing = entries.find((entry) => entry.uid === user.uid);
   const nextEntry = normalizeEntry({
     uid: user.uid,
@@ -107,19 +108,20 @@ export function rememberAnonymousAccount(auth, user, metadata = {}) {
     ...entries.filter((entry) => entry.uid !== user.uid),
   ].filter(Boolean);
 
-  writeEntries(auth, nextEntries);
+  writeEntries(auth, eventId, nextEntries);
 }
 
-export function forgetAnonymousAccount(auth, uid) {
+export function forgetAnonymousAccount(auth, eventId, uid) {
   if (!uid) return;
   writeEntries(
     auth,
-    readEntries(auth).filter((entry) => entry.uid !== uid),
+    eventId,
+    readEntries(auth, eventId).filter((entry) => entry.uid !== uid),
   );
 }
 
-export async function restoreAnonymousAccount(auth, uid) {
-  const entry = readEntries(auth).find((candidate) => candidate.uid === uid);
+export async function restoreAnonymousAccount(auth, eventId, uid) {
+  const entry = readEntries(auth, eventId).find((candidate) => candidate.uid === uid);
   if (!entry) {
     throw new Error('anonymous-account-not-found');
   }
@@ -127,7 +129,7 @@ export async function restoreAnonymousAccount(auth, uid) {
   try {
     const user = UserImpl._fromJSON(auth, entry.authUser);
     await updateCurrentUser(auth, user);
-    rememberAnonymousAccount(auth, user, {
+    rememberAnonymousAccount(auth, user, eventId, {
       email: entry.email,
       roles: entry.roles,
       requestStatus: entry.requestStatus,
@@ -135,7 +137,7 @@ export async function restoreAnonymousAccount(auth, uid) {
     return user;
   } catch (error) {
     log.error('failed to restore anonymous account', { uid, error });
-    forgetAnonymousAccount(auth, uid);
+    forgetAnonymousAccount(auth, eventId, uid);
     throw error;
   }
 }

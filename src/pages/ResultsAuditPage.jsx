@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useEventContext } from '../context/EventContext';
 import { subscribeResultEvents, toggleResultEventActive } from '../firebase/results';
 import { formatEventTimestamp, sortEventsNewestFirst } from '../utils/resultsDerivation';
-import { ROUTES } from '../utils/routes';
+import { buildEventRoute } from '../utils/routes';
 
 export default function ResultsAuditPage() {
+  const { event: currentEvent } = useEventContext();
   const [events, setEvents] = useState([]);
   const [busyId, setBusyId] = useState('');
   const [courseFilter, setCourseFilter] = useState('');
   const [participantFilter, setParticipantFilter] = useState('');
 
-  useEffect(() => subscribeResultEvents((entries) => setEvents(sortEventsNewestFirst(entries))), []);
+  useEffect(() => subscribeResultEvents(currentEvent.id, (entries) => setEvents(sortEventsNewestFirst(entries))), [currentEvent.id]);
 
   const courses = useMemo(
     () => [...new Set(events.map((event) => event.courseLabel || event.courseId).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
@@ -37,7 +39,7 @@ export default function ResultsAuditPage() {
         <div className="admin-section-head">
           <h2 className="section-title">Journal Résultats</h2>
           <div className="admin-actions">
-            <Link className="btn btn-secondary btn-sm" to={ROUTES.runs}>
+            <Link className="btn btn-secondary btn-sm" to={buildEventRoute(currentEvent.slug, 'runs')}>
               Corriger un run
             </Link>
           </div>
@@ -119,7 +121,7 @@ export default function ResultsAuditPage() {
                         onChange={async (e) => {
                           setBusyId(event.id);
                           try {
-                            await toggleResultEventActive(event.id, e.target.checked);
+                            await toggleResultEventActive(currentEvent.id, event.id, e.target.checked);
                           } finally {
                             setBusyId('');
                           }

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useEventContext } from '../../context/EventContext';
 import { subscribeResultEvents } from '../../firebase/results';
 import { deriveLatestCourse } from '../../utils/resultsDerivation';
 
@@ -6,11 +7,12 @@ import { deriveLatestCourse } from '../../utils/resultsDerivation';
  * Displays the ranking of the most recently completed course.
  */
 export default function RaceResultsDisplay() {
+  const { event } = useEventContext();
   const [course, setCourse] = useState(null);
 
   useEffect(() => {
-    return subscribeResultEvents((events) => setCourse(deriveLatestCourse(events)));
-  }, []);
+    return subscribeResultEvents(event.id, (events) => setCourse(deriveLatestCourse(events)));
+  }, [event.id]);
 
   return (
     <div className="vd-root">

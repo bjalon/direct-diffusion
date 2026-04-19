@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signInAnonymously } from 'firebase/auth';
 import AnonymousAccountList from '../components/AnonymousAccountList';
+import { useEventContext } from '../context/EventContext';
 import { auth, ensureFirestoreOnline } from '../firebase';
 import { subscribeParticipants } from '../firebase/participants';
 import {
@@ -33,16 +34,17 @@ import {
 import { createLogger } from '../utils/logger';
 import { forgetAnonymousAccount, listAnonymousAccounts, restoreAnonymousAccount } from '../utils/anonymousAccounts';
 import { deriveFinishedCourses, deriveGeneralRanking, deriveRunsFromEvents } from '../utils/resultsDerivation';
-import { ROUTES } from '../utils/routes';
+import { buildEventRoute } from '../utils/routes';
 
 const log = createLogger('ResultsPage');
 const RESUME_EVENT_DEBOUNCE_MS = 750;
 
 export default function ResultsPage({ user, onLogout }) {
+  const { event } = useEventContext();
   const navigate = useNavigate();
   useResultsResumeLifecycle();
   const [signInState, setSignInState] = useState('idle');
-  const [knownAccounts, setKnownAccounts] = useState(() => listAnonymousAccounts(auth));
+  const [knownAccounts, setKnownAccounts] = useState(() => listAnonymousAccounts(auth, event.id));
   const [clockState, setClockState] = useState({
     status: 'pending',
     driftMs: 0,
@@ -77,8 +79,8 @@ export default function ResultsPage({ user, onLogout }) {
 
   useEffect(() => {
     if (user !== false) return;
-    setKnownAccounts(listAnonymousAccounts(auth));
-  }, [user?.uid, user === false]);
+    setKnownAccounts(listAnonymousAccounts(auth, event.id));
+  }, [event.id, user?.uid, user === false]);
 
   const clearSelectedStationState = (nextStationError = '') => {
     setSelectedStation('');
@@ -100,7 +102,7 @@ export default function ResultsPage({ user, onLogout }) {
     }
 
     try {
-      const assignment = await readCurrentStationAssignment(station);
+      const assignment = await readCurrentStationAssignment(event.id, station);
       if (!assignment || assignment.assignedUid !== actor?.uid) {
         log.info('redirecting to station choice after station loss', {
           station,
@@ -169,20 +171,20 @@ export default function ResultsPage({ user, onLogout }) {
     setSignInState('signing-in');
     setActionError('');
     try {
-      await restoreAnonymousAccount(auth, uid);
+      await restoreAnonymousAccount(auth, event.id, uid);
       log.info('anonymous results account restored', { uid });
       setSignInState('done');
     } catch (error) {
       log.error('anonymous results account restore failed', { uid, error });
-      setKnownAccounts(listAnonymousAccounts(auth));
+      setKnownAccounts(listAnonymousAccounts(auth, event.id));
       setSignInState('error');
       setActionError('Impossible de reprendre ce compte léger local.');
     }
   };
 
   const handleDeleteAnonymousSignIn = (uid) => {
-    forgetAnonymousAccount(auth, uid);
-    setKnownAccounts(listAnonymousAccounts(auth));
+    forgetAnonymousAccount(auth, event.id, uid);
+    setKnownAccounts(listAnonymousAccounts(auth, event.id));
   };
 
   useEffect(() => {
@@ -196,7 +198,7 @@ export default function ResultsPage({ user, onLogout }) {
       serverNow: null,
       measuredAtClientMs: null,
     });
-    verifyBrowserClock(user.uid)
+    verifyBrowserClock(event.id, user.uid)
       .then(({ driftMs, serverNow }) => {
         const measuredAtClientMs = Date.now();
         log.info('browser clock verification completed', { uid: user.uid, driftMs });
@@ -218,20 +220,20 @@ export default function ResultsPage({ user, onLogout }) {
           measuredAtClientMs: null,
         });
       });
-  }, [user?.uid]);
+  }, [event.id, user?.uid]);
 
   useEffect(() => {
     if (!user || user === false) return;
-    return subscribeResultAccess(user.uid, setResultAccess);
-  }, [user?.uid]);
+    return subscribeResultAccess(event.id, user.uid, setResultAccess);
+  }, [event.id, user?.uid]);
 
   useEffect(() => {
     if (!user || user === false) return;
-    return subscribeResultAccessRequest(user.uid, (request) => {
+    return subscribeResultAccessRequest(event.id, user.uid, (request) => {
       setResultRequest(request);
       if (request?.email) setRequestEmail(request.email);
     });
-  }, [user?.uid]);
+  }, [event.id, user?.uid]);
 
   const canStart = !!resultAccess?.results_start;
   const canFinish = !!resultAccess?.results_finish;
@@ -264,29 +266,29 @@ export default function ResultsPage({ user, onLogout }) {
 
   useEffect(() => {
     if (!hasResultAccess) return;
-    return subscribeCurrentCompetitor(setCurrentCompetitor);
-  }, [hasResultAccess]);
+    return subscribeCurrentCompetitor(event.id, setCurrentCompetitor);
+  }, [event.id, hasResultAccess]);
 
   useEffect(() => {
     if (!canStart) return;
-    return subscribeParticipants(setParticipants);
-  }, [canStart]);
+    return subscribeParticipants(event.id, setParticipants);
+  }, [event.id, canStart]);
 
   useEffect(() => {
     if (!hasResultAccess) return;
-    return subscribeResultEvents(setResultEvents);
-  }, [hasResultAccess]);
+    return subscribeResultEvents(event.id, setResultEvents);
+  }, [event.id, hasResultAccess]);
 
   useEffect(() => {
     const unsubs = [];
     if (canStart) {
-      unsubs.push(subscribeStation('start', (doc) => setStationDocs((prev) => ({ ...prev, start: doc }))));
+      unsubs.push(subscribeStation(event.id, 'start', (doc) => setStationDocs((prev) => ({ ...prev, start: doc }))));
     }
     if (canFinish) {
-      unsubs.push(subscribeStation('finish', (doc) => setStationDocs((prev) => ({ ...prev, finish: doc }))));
+      unsubs.push(subscribeStation(event.id, 'finish', (doc) => setStationDocs((prev) => ({ ...prev, finish: doc }))));
     }
     return () => unsubs.forEach((unsub) => unsub());
-  }, [canStart, canFinish]);
+  }, [event.id, canStart, canFinish]);
 
   useEffect(() => {
     if (selectedStation || !actor?.uid || !user || user === false || !hasResultAccess) return;
@@ -297,8 +299,8 @@ export default function ResultsPage({ user, onLogout }) {
     (async () => {
       try {
         const [startAssignment, finishAssignment] = await Promise.all([
-          readCurrentStationAssignment('start'),
-          readCurrentStationAssignment('finish'),
+          readCurrentStationAssignment(event.id, 'start'),
+          readCurrentStationAssignment(event.id, 'finish'),
         ]);
         if (cancelled) return;
 
@@ -323,7 +325,7 @@ export default function ResultsPage({ user, onLogout }) {
             actorUid: actor.uid,
           });
           try {
-            await releaseStation(ownedStation.station, actor.uid);
+            await releaseStation(event.id, ownedStation.station, actor.uid);
           } catch (error) {
             log.warn('failed to release stale station assignment', {
               station: ownedStation.station,
@@ -381,6 +383,7 @@ export default function ResultsPage({ user, onLogout }) {
     }
 
     return subscribeCurrentStationAssignment(
+      event.id,
       selectedStation,
       (doc) => {
         setSelectedStationAssignment(doc);
@@ -399,7 +402,7 @@ export default function ResultsPage({ user, onLogout }) {
         setStationError(getErrorLabel(error));
       },
     );
-  }, [selectedStation, expectedStationRelease]);
+  }, [event.id, selectedStation, expectedStationRelease]);
 
   useEffect(() => {
     if (!selectedStation || !actor?.uid) return;
@@ -409,7 +412,7 @@ export default function ResultsPage({ user, onLogout }) {
     let cancelled = false;
     setExpectedStationRelease(selectedStation);
 
-    releaseStation(selectedStation, actor.uid)
+    releaseStation(event.id, selectedStation, actor.uid)
       .catch((error) => {
         log.warn('failed to release station after permission loss', {
           station: selectedStation,
@@ -431,7 +434,7 @@ export default function ResultsPage({ user, onLogout }) {
     return () => {
       cancelled = true;
     };
-  }, [selectedStation, actor?.uid, canStart, canFinish, expectedStationRelease]);
+  }, [event.id, selectedStation, actor?.uid, canStart, canFinish, expectedStationRelease]);
 
   useEffect(() => {
     const runId = currentCompetitor?.runId;
@@ -539,7 +542,7 @@ export default function ResultsPage({ user, onLogout }) {
     setStationState('claiming');
     setStationError('');
     try {
-      await claimStation(station, actor);
+      await claimStation(event.id, station, actor);
       log.info('station claimed', { station, actorUid: actor.uid });
       setSelectedStation(station);
       setSelectedStationAssignment({
@@ -561,7 +564,7 @@ export default function ResultsPage({ user, onLogout }) {
     setExpectedStationRelease(selectedStation);
     setActionError('');
     try {
-      await releaseStation(selectedStation, actor.uid);
+      await releaseStation(event.id, selectedStation, actor.uid);
       clearSelectedStationState();
     } catch (error) {
       log.error('station release failed', { station: selectedStation, actorUid: actor.uid, error });
@@ -579,7 +582,7 @@ export default function ResultsPage({ user, onLogout }) {
 
     setExpectedStationRelease(selectedStation);
     try {
-      await releaseStation(selectedStation, actor.uid);
+      await releaseStation(event.id, selectedStation, actor.uid);
     } catch (error) {
       log.warn('station release failed during logout', {
         station: selectedStation,
@@ -638,7 +641,7 @@ export default function ResultsPage({ user, onLogout }) {
           onLogout={handleResultsLogout}
           actions={(
             <>
-              <button className="btn btn-primary login-btn" onClick={() => navigate(ROUTES.display)}>
+              <button className="btn btn-primary login-btn" onClick={() => navigate(buildEventRoute(event.slug, 'display'))}>
                 Aller sur Affichage
               </button>
               <button className="btn btn-secondary login-btn" onClick={handleResultsLogout}>
@@ -682,7 +685,7 @@ export default function ResultsPage({ user, onLogout }) {
             setSubmitState('sending');
             setActionError('');
             try {
-              await submitResultAccessRequest({
+              await submitResultAccessRequest(event.id, {
                 uid: user.uid,
                 email: requestEmail,
                 providerId: primaryProvider(user),
@@ -870,6 +873,7 @@ function StartStationView({
   onLogout,
   showUnavailableNotice,
 }) {
+  const { event } = useEventContext();
   const ownsCurrent = currentCompetitor?.selectedByUid === actor.uid;
   const isArmed = ownsCurrent && currentCompetitor?.status === 'armed';
   const isRunning = currentCompetitor?.status === 'running';
@@ -955,7 +959,7 @@ function StartStationView({
     setStartBuffer(next);
     saveStartBuffer(currentCompetitor.runId, next);
     try {
-      await mirrorPendingStartClicks({ currentCompetitor, clicks: next, actor });
+      await mirrorPendingStartClicks(event.id, { currentCompetitor, clicks: next, actor });
     } catch (error) {
       log.error('mirror pending start clicks failed', error);
       await onActionError(error, 'start');
@@ -1006,7 +1010,7 @@ function StartStationView({
                   setBusyAction('course');
                   setActionError('');
                   try {
-                    await setStartStationCourse({
+                    await setStartStationCourse(event.id, {
                       uid: actor.uid,
                       courseId: nextCourse.courseId,
                       courseLabel: nextCourse.courseLabel,
@@ -1037,7 +1041,7 @@ function StartStationView({
                         setBusyAction('course');
                         setActionError('');
                         try {
-                          await setStartStationCourse({
+                          await setStartStationCourse(event.id, {
                             uid: actor.uid,
                             courseId: course.courseId,
                             courseLabel: course.courseLabel,
@@ -1074,7 +1078,7 @@ function StartStationView({
     if (!canChangeCourse) return;
     setBusyAction('change-course');
     setActionError('');
-    setStartStationCourse({
+    setStartStationCourse(event.id, {
       uid: actor.uid,
       courseId: null,
       courseLabel: '',
@@ -1138,7 +1142,7 @@ function StartStationView({
                       const seed = createClickEntry();
                       const runId = seed.clickId;
                       const startId = seed.clickId;
-                      await armCurrentCompetitor({
+                      await armCurrentCompetitor(event.id, {
                         participant,
                         actor,
                         runId,
@@ -1215,7 +1219,7 @@ function StartStationView({
                 setBusyAction('sync');
                 setActionError('');
                 try {
-                  await syncStartBuffer({ currentCompetitor, clicks: startBuffer, actor });
+                  await syncStartBuffer(event.id, { currentCompetitor, clicks: startBuffer, actor });
                   clearStartBuffer(currentCompetitor.runId);
                   setStartBuffer([]);
                 } catch (error) {
@@ -1245,7 +1249,7 @@ function StartStationView({
               setBusyAction('cancel');
               setActionError('');
               try {
-                await cancelCurrentCompetitor(currentCompetitor.runId, actor.uid);
+                await cancelCurrentCompetitor(event.id, currentCompetitor.runId, actor.uid);
                 clearStartBuffer(currentCompetitor.runId);
                 setStartBuffer([]);
               } catch (error) {
@@ -1319,6 +1323,7 @@ function FinishStationView({
   onLogout,
   showUnavailableNotice,
 }) {
+  const { event } = useEventContext();
   const finishedCourses = useMemo(() => deriveFinishedCourses(resultEvents), [resultEvents]);
   const recentRuns = useMemo(() => deriveRunsFromEvents(resultEvents).slice(0, 3), [resultEvents]);
   const hasLocalStart = Number.isFinite(currentCompetitor?.latestStartAtClientMs);
@@ -1392,7 +1397,7 @@ function FinishStationView({
                   setBusyAction('finish');
                   setActionError('');
                   try {
-                    await completeCurrentCompetitor({
+                    await completeCurrentCompetitor(event.id, {
                       actor,
                       click: createClickEntry(),
                     });
@@ -1417,7 +1422,7 @@ function FinishStationView({
                   setBusyAction('abandon');
                   setActionError('');
                   try {
-                    await abandonCurrentCompetitor({
+                    await abandonCurrentCompetitor(event.id, {
                       actor,
                       click: createClickEntry(),
                     });

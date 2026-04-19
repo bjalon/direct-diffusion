@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useEventContext } from '../context/EventContext';
 import { subscribeParticipants } from '../firebase/participants';
 import { subscribeResultRuns, toggleResultRunActive, upsertAdminRun } from '../firebase/results';
 
 export default function ResultsRunsPage({ currentUser }) {
+  const { event } = useEventContext();
   const [participants, setParticipants] = useState([]);
   const [resultRuns, setResultRuns] = useState([]);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -18,8 +20,8 @@ export default function ResultsRunsPage({ currentUser }) {
   const [runStartAt, setRunStartAt] = useState('');
   const [runTerminalAt, setRunTerminalAt] = useState('');
 
-  useEffect(() => subscribeParticipants(setParticipants), []);
-  useEffect(() => subscribeResultRuns(setResultRuns), []);
+  useEffect(() => subscribeParticipants(event.id, setParticipants), [event.id]);
+  useEffect(() => subscribeResultRuns(event.id, setResultRuns), [event.id]);
 
   const adminActor = useMemo(
     () => ({
@@ -144,7 +146,7 @@ export default function ResultsRunsPage({ currentUser }) {
 
     setBusyKey('run-save');
     try {
-      const result = await upsertAdminRun({
+      const result = await upsertAdminRun(event.id, {
         runId: runEditId || undefined,
         startId: runEditStartId || undefined,
         courseId: selectedCourse.courseId,
@@ -173,7 +175,7 @@ export default function ResultsRunsPage({ currentUser }) {
     const key = `run-active:${run.runId || run.id}`;
     setBusyKey(key);
     try {
-      await toggleResultRunActive({
+      await toggleResultRunActive(event.id, {
         runId: run.runId || run.id || '',
         officialStartClickId: run.officialStartClickId,
         latestStartClickId: run.latestStartClickId,
