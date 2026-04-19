@@ -17,10 +17,10 @@ export function useEventContext() {
 
 export function useEventRoute(routeKey) {
   const { event } = useEventContext();
-  return buildEventRoute(event.slug, routeKey);
+  return buildEventRoute(event.slug, routeKey, event.type);
 }
 
 export function useEventRoot() {
   const { event } = useEventContext();
-  return eventRoot(event.slug);
+  return eventRoot(event.slug, event.type);
 }

@@ -81,6 +81,8 @@ function buildAccountMetaLabel(account) {
   if (account.roles?.tv) parts.push('TV');
   if (account.roles?.results_start) parts.push('Départ');
   if (account.roles?.results_finish) parts.push('Arrivée');
+  if (account.roles?.score) parts.push('Score');
+  if (account.roles?.commentator) parts.push('Commentaire');
   if (account.requestStatus === 'pending') parts.push('Demande en attente');
 
   return parts.join(' · ');

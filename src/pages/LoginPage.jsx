@@ -4,7 +4,9 @@ import { GoogleAuthProvider, signInAnonymously, signInWithPopup } from 'firebase
 import AnonymousAccountList from '../components/AnonymousAccountList';
 import { useEventContext } from '../context/EventContext';
 import { auth } from '../firebase';
+import { submitFootballAccessRequest } from '../firebase/football';
 import { submitResultAccessRequest } from '../firebase/results';
+import { footballAccessLabel } from '../utils/football';
 import { createLogger } from '../utils/logger';
 import { forgetAnonymousAccount, listAnonymousAccounts, restoreAnonymousAccount } from '../utils/anonymousAccounts';
 import { buildEventRoute } from '../utils/routes';
@@ -15,6 +17,7 @@ const log = createLogger('LoginPage');
 export default function LoginPage({ user, deviceAccess, deviceRequest }) {
   const { event } = useEventContext();
   const navigate = useNavigate();
+  const isFootball = event.type === 'football';
   const [status, setStatus] = useState('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [requestEmail, setRequestEmail] = useState('');
@@ -59,11 +62,19 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
         isAnonymous: credential.user.isAnonymous,
       });
 
-      await submitResultAccessRequest(event.id, {
-        uid: credential.user.uid,
-        email: requestEmail.trim().toLowerCase(),
-        providerId: 'anonymous',
-      });
+      if (isFootball) {
+        await submitFootballAccessRequest(event.id, {
+          uid: credential.user.uid,
+          email: requestEmail.trim().toLowerCase(),
+          providerId: 'anonymous',
+        });
+      } else {
+        await submitResultAccessRequest(event.id, {
+          uid: credential.user.uid,
+          email: requestEmail.trim().toLowerCase(),
+          providerId: 'anonymous',
+        });
+      }
 
       log.info('lightweight access request stored', {
         uid: credential.user.uid,
@@ -124,6 +135,32 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
     );
   }
 
+  if (isFootball && user?.isAnonymous && (deviceAccess?.tv || deviceAccess?.score || deviceAccess?.commentator)) {
+    const targetRoute = deviceAccess.tv
+      ? buildEventRoute(event.slug, 'display', event.type)
+      : buildEventRoute(event.slug, 'scoreboard', event.type);
+
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <div className="login-logo" aria-hidden>DD</div>
+          <h1 className="login-title">Accès foot actif</h1>
+          <p className="login-subtitle">
+            Ce compte léger peut accéder à la vue {footballAccessLabel(deviceAccess).toLowerCase()}.
+          </p>
+          <div className="results-status-card">
+            <div className="results-status-line"><strong>Email:</strong> {deviceAccess.email || '—'}</div>
+            <div className="results-status-line"><strong>UID:</strong> {user.uid}</div>
+            <div className="results-status-line"><strong>Rôles:</strong> {footballAccessLabel(deviceAccess)}</div>
+            <button className="btn btn-primary login-btn" onClick={() => navigate(targetRoute)}>
+              {deviceAccess.tv ? 'Aller sur Affichage' : 'Aller sur Score'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (user?.isAnonymous && deviceAccess?.tv) {
     return (
       <div className="login-page">
@@ -136,7 +173,7 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
           <div className="results-status-card">
             <div className="results-status-line"><strong>Email:</strong> {deviceAccess.email || '—'}</div>
             <div className="results-status-line"><strong>UID:</strong> {user.uid}</div>
-            <button className="btn btn-primary login-btn" onClick={() => navigate(buildEventRoute(event.slug, 'display'))}>
+            <button className="btn btn-primary login-btn" onClick={() => navigate(buildEventRoute(event.slug, 'display', event.type))}>
               Aller sur Affichage
             </button>
           </div>
@@ -151,7 +188,9 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
         <div className="login-logo" aria-hidden>DD</div>
         <h1 className="login-title">Direct Diffusion</h1>
         <p className="login-subtitle">
-          Les vues d&apos;administration, flux et participants sont accessibles via Google OAuth.
+          {isFootball
+            ? 'Les vues d’administration foot sont accessibles via Google OAuth.'
+            : 'Les vues d&apos;administration, flux et participants sont accessibles via Google OAuth.'}
         </p>
         <button
           className="btn btn-google login-btn"
@@ -190,7 +229,9 @@ export default function LoginPage({ user, deviceAccess, deviceRequest }) {
 
         <form className="login-form" onSubmit={handleRequestAccess}>
           <p className="login-subtitle">
-            Demander un accès léger en saisissant simplement votre email.
+            {isFootball
+              ? 'Demander un accès léger TV, score ou commentaire en saisissant simplement votre email.'
+              : 'Demander un accès léger en saisissant simplement votre email.'}
           </p>
           <input
             type="email"

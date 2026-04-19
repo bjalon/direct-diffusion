@@ -88,6 +88,31 @@ service cloud.firestore {
       return hasResultRole(eventId, 'tv');
     }
 
+    function hasFootballUser(eventId) {
+      return isAuthenticated()
+             && exists(/databases/$(database)/documents/events/$(eventId)/allowedFootballUsers/$(request.auth.uid));
+    }
+
+    function footballRoles(eventId) {
+      return get(/databases/$(database)/documents/events/$(eventId)/allowedFootballUsers/$(request.auth.uid)).data;
+    }
+
+    function hasFootballRole(eventId, role) {
+      return hasFootballUser(eventId) && footballRoles(eventId).get(role, false) == true;
+    }
+
+    function hasFootballTvAccess(eventId) {
+      return hasFootballRole(eventId, 'tv');
+    }
+
+    function hasFootballScoreAccess(eventId) {
+      return hasFootballRole(eventId, 'score');
+    }
+
+    function hasFootballCommentatorAccess(eventId) {
+      return hasFootballRole(eventId, 'commentator');
+    }
+
     function canManageStation(eventId, stationId) {
       return (stationId == 'start' && hasResultRole(eventId, 'results_start'))
              || (stationId == 'finish' && hasResultRole(eventId, 'results_finish'));
@@ -241,6 +266,47 @@ service cloud.firestore {
       return hasOnlyTvRole(data) || hasOnlyResultsRoles(data);
     }
 
+    function validFootballRoleCombination(data) {
+      return (data.get('tv', false) == true
+              && data.get('score', false) == false
+              && data.get('commentator', false) == false)
+             || data.get('tv', false) == false;
+    }
+
+    function footballScoreStationPath(eventId, stationId) {
+      return /databases/$(database)/documents/events/$(eventId)/footballStations/$(stationId);
+    }
+
+    function footballScoreStationExists(eventId, stationId) {
+      return exists(footballScoreStationPath(eventId, stationId));
+    }
+
+    function footballScoreStationOwnedByRequester(eventId, stationId) {
+      return footballScoreStationExists(eventId, stationId)
+             && get(footballScoreStationPath(eventId, stationId)).data.assignedUid == request.auth.uid;
+    }
+
+    function canClaimFootballScoreStation(eventId, stationId) {
+      return hasFootballScoreAccess(eventId)
+             && request.resource.data.assignedUid == request.auth.uid
+             && request.resource.data.station == 'score'
+             && request.resource.data.matchId == stationId
+             && (!footballScoreStationExists(eventId, stationId) || footballScoreStationOwnedByRequester(eventId, stationId));
+    }
+
+    function canCreateFootballEvent(eventId) {
+      return request.resource.data.matchId != null
+             && request.resource.data.createdByUid == request.auth.uid
+             && (
+               (request.resource.data.type == 'goal'
+                && (isEventAdministration(eventId) || footballScoreStationOwnedByRequester(eventId, request.resource.data.matchId)))
+               || (request.resource.data.type == 'highlight'
+                   && (isEventAdministration(eventId)
+                       || footballScoreStationOwnedByRequester(eventId, request.resource.data.matchId)
+                       || hasFootballCommentatorAccess(eventId)))
+             );
+    }
+
     match /allowedUsers/{email} {
       allow get: if hasEmail() && email == authEmail();
       allow list: if isEventsAdministration();
@@ -251,8 +317,11 @@ service cloud.firestore {
       allow read: if isEventsAdministration()
                   || resource.data.published == true
                   || isEventAllowedUser(eventId)
-                  || hasResultUser(eventId);
-      allow create, update, delete: if isEventsAdministration();
+                  || hasResultUser(eventId)
+                  || hasFootballUser(eventId);
+      allow create, delete: if isEventsAdministration();
+      allow update: if isEventsAdministration()
+                    && request.resource.data.type == resource.data.type;
 
       match /allowedUsers/{email} {
         allow get: if isEventsAdministration() || isEventAdministration(eventId) || (hasEmail() && email == authEmail());
@@ -277,7 +346,30 @@ service cloud.firestore {
         allow delete: if isEventAdministration(eventId);
       }
 
+      match /allowedFootballUsers/{uid} {
+        allow get: if isEventAdministration(eventId) || (isAuthenticated() && uid == request.auth.uid);
+        allow list: if isEventAdministration(eventId);
+        allow create, update: if isEventAdministration(eventId) && validFootballRoleCombination(request.resource.data);
+        allow delete: if isEventAdministration(eventId);
+      }
+
       match /resultAccessRequests/{uid} {
+        allow create: if (isAuthenticated()
+                          && uid == request.auth.uid
+                          && request.resource.data.uid == request.auth.uid
+                          && request.resource.data.status == 'pending')
+                      || isEventAdministration(eventId);
+        allow update: if (isAuthenticated()
+                          && uid == request.auth.uid
+                          && request.resource.data.uid == request.auth.uid
+                          && request.resource.data.status == 'pending')
+                      || isEventAdministration(eventId);
+        allow get: if isEventAdministration(eventId) || (isAuthenticated() && uid == request.auth.uid);
+        allow list: if isEventAdministration(eventId);
+        allow delete: if isEventAdministration(eventId);
+      }
+
+      match /footballAccessRequests/{uid} {
         allow create: if (isAuthenticated()
                           && uid == request.auth.uid
                           && request.resource.data.uid == request.auth.uid
@@ -336,13 +428,35 @@ service cloud.firestore {
         allow read, write: if isAuthenticated() && uid == request.auth.uid;
       }
 
+      match /footballStations/{docId} {
+        allow get: if isEventAdministration(eventId)
+                   || hasFootballScoreAccess(eventId)
+                   || hasFootballCommentatorAccess(eventId);
+        allow list: if isEventAdministration(eventId) || hasFootballScoreAccess(eventId);
+        allow create, update: if canClaimFootballScoreStation(eventId, docId)
+                              || isEventAdministration(eventId);
+        allow delete: if isEventAdministration(eventId)
+                      || footballScoreStationOwnedByRequester(eventId, docId);
+      }
+
+      match /footballMatches/{matchId} {
+        allow read: if canReadProtectedEventData(eventId) || hasFootballUser(eventId);
+        allow create, update, delete: if isEventAdministration(eventId);
+      }
+
+      match /footballEvents/{eventDocId} {
+        allow read: if canReadProtectedEventData(eventId) || hasFootballUser(eventId);
+        allow create: if canCreateFootballEvent(eventId);
+        allow update, delete: if isEventAdministration(eventId);
+      }
+
       match /config/{docId} {
-        allow read: if canReadProtectedEventData(eventId) || hasTvAccess(eventId);
+        allow read: if canReadProtectedEventData(eventId) || hasTvAccess(eventId) || hasFootballTvAccess(eventId);
         allow write: if isEventAdminFlux(eventId) || isEventAdministration(eventId);
       }
 
       match /participants/{participantId} {
-        allow read: if canReadProtectedEventData(eventId) || hasGrantedResultAccess(eventId);
+        allow read: if canReadProtectedEventData(eventId) || hasGrantedResultAccess(eventId) || hasFootballUser(eventId);
         allow write: if isEventParticipants(eventId) || isEventAdministration(eventId);
       }
     }

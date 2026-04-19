@@ -200,6 +200,10 @@ export default function EventAdminPage({ currentUser }) {
     () => allEvents.find((event) => event.id === selectedEventId) ?? null,
     [allEvents, selectedEventId],
   );
+  const editedEvent = useMemo(
+    () => allEvents.find((event) => event.id === editingId) ?? null,
+    [allEvents, editingId],
+  );
   const currentEmail = currentUser?.email?.trim().toLowerCase() ?? '';
   const currentEventUserEntry = useMemo(
     () => allowedUsers.find((entry) => entry.id === currentEmail) ?? null,
@@ -272,7 +276,7 @@ export default function EventAdminPage({ currentUser }) {
     try {
       const payload = {
         title,
-        type: draft.type,
+        type: editingId ? (editedEvent?.type || draft.type) : draft.type,
         published: draft.published,
         promotionStartsAt,
         promotionEndsAt: promotionEndsAt || null,
@@ -584,7 +588,7 @@ export default function EventAdminPage({ currentUser }) {
                   </div>
                 </div>
                 <div className="admin-actions">
-                  <Link className="btn btn-secondary btn-sm" to={buildEventRoute(event.slug || event.id, 'display')}>
+                  <Link className="btn btn-secondary btn-sm" to={buildEventRoute(event.slug || event.id, 'display', event.type)}>
                     Ouvrir
                   </Link>
                   <button
@@ -826,11 +830,15 @@ export default function EventAdminPage({ currentUser }) {
                     className="form-input"
                     value={draft.type}
                     onChange={(e) => setDraft((prev) => ({ ...prev, type: e.target.value }))}
+                    disabled={!!editingId}
                   >
                     {EVENT_TYPE_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
+                  {editingId && (
+                    <span className="hint">Le type d&apos;événement est figé après création.</span>
+                  )}
                 </label>
                 <label className="admin-form-field">
                   <span>URL du site</span>

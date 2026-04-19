@@ -28,6 +28,8 @@ function normalizeRoles(roles = {}) {
     tv: !!roles.tv,
     results_start: !!roles.results_start,
     results_finish: !!roles.results_finish,
+    score: !!roles.score,
+    commentator: !!roles.commentator,
   };
 }
 

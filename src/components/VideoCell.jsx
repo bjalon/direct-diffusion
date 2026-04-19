@@ -89,7 +89,7 @@ function getBroadcastBadge(stream) {
   return null;
 }
 
-export default function VideoCell({ stream, slotIndex }) {
+export default function VideoCell({ stream, slotIndex, scoreOverlay = null }) {
   const containerRef = useRef(null);
   const [size, setSize] = useState(null);
   const broadcastBadge = getBroadcastBadge(stream);
@@ -200,6 +200,15 @@ export default function VideoCell({ stream, slotIndex }) {
   return (
     <div ref={containerRef} className="video-cell">
       {renderContent()}
+      {scoreOverlay && (
+        <div className="video-score-overlay">
+          <span className="video-score-team">{scoreOverlay.homeTrigram}</span>
+          <span className="video-score-value">{scoreOverlay.homeScore}</span>
+          <span className="video-score-separator">-</span>
+          <span className="video-score-value">{scoreOverlay.awayScore}</span>
+          <span className="video-score-team">{scoreOverlay.awayTrigram}</span>
+        </div>
+      )}
       {broadcastBadge && (
         <div className={`video-broadcast-badge ${broadcastBadge.className}`}>
           {broadcastBadge.withPulse && <span className="video-broadcast-dot" />}

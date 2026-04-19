@@ -19,6 +19,7 @@ export function subscribeParticipants(eventId, onData) {
           id: d.id,
           ...data,
           active: data.active !== false,
+          trigram: data.trigram ?? '',
         };
       });
       log.debug('participants snapshot', { eventId, count: participants.length });
@@ -30,8 +31,17 @@ export function subscribeParticipants(eventId, onData) {
   );
 }
 
-export const addParticipant = (eventId, label, order) =>
-  (log.info('addParticipant', { eventId, label, order }), addDoc(COLL(eventId), { label, order, active: true }));
+export const addParticipant = (eventId, labelOrData, order) => {
+  const payload = typeof labelOrData === 'string'
+    ? { label: labelOrData, order, active: true }
+    : {
+      ...labelOrData,
+      active: labelOrData?.active !== false,
+    };
+
+  log.info('addParticipant', { eventId, payload });
+  return addDoc(COLL(eventId), payload);
+};
 
 export const updateParticipant = (eventId, id, data) =>
   (log.info('updateParticipant', { eventId, id, data }), updateDoc(eventSubdoc(eventId, 'participants', id), data));

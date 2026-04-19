@@ -1,7 +1,7 @@
 import { getLayouts } from '../utils/storage';
 import VideoCell from '../components/VideoCell';
 
-export default function DisplayPage({ config }) {
+export default function DisplayPage({ config, scoreOverlayByStream = {} }) {
   const layouts = getLayouts();
   const layout = layouts[config.layout] ?? layouts['1'];
   const { cols, rows, placements } = layout;
@@ -30,7 +30,11 @@ export default function DisplayPage({ config }) {
             minHeight: 0,
           }}
         >
-          <VideoCell stream={getStream(i)} slotIndex={i} />
+          <VideoCell
+            stream={getStream(i)}
+            slotIndex={i}
+            scoreOverlay={scoreOverlayByStream[getStream(i)?.id] ?? null}
+          />
         </div>
       ))}
     </div>

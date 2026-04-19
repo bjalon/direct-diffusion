@@ -19,7 +19,20 @@ import {
   subscribeCurrentStationAssignment,
   subscribePendingResultAccessRequests,
 } from '../firebase/results';
+import {
+  approveFootballAccessRequest,
+  deleteAllowedFootballUser,
+  rejectFootballAccessRequest,
+  releaseScoreStationAsAdmin,
+  saveAllowedFootballUser,
+  subscribeAllowedFootballUsers,
+  subscribePendingFootballAccessRequests,
+  subscribeScoreStations,
+  subscribeMatches,
+} from '../firebase/football';
 import { createLogger } from '../utils/logger';
+import { FOOTBALL_LIGHT_ROLE_KEYS, FOOTBALL_LIGHT_ROLE_LABELS, enrichMatches, normalizeFootballRoles } from '../utils/football';
+import { subscribeParticipants } from '../firebase/participants';
 
 const log = createLogger('AdminPage');
 
@@ -45,11 +58,17 @@ const DEFAULT_NORMAL_ROLES = {
 
 export default function AdminPage({ currentUser }) {
   const { event } = useEventContext();
+  const isFootball = event.type === 'football';
   const [allowedUsers, setAllowedUsers] = useState([]);
   const [requests, setRequests] = useState([]);
   const [allowedResultUsers, setAllowedResultUsers] = useState([]);
   const [resultRequests, setResultRequests] = useState([]);
   const [stationAssignments, setStationAssignments] = useState({ start: null, finish: null });
+  const [allowedFootballUsers, setAllowedFootballUsers] = useState([]);
+  const [footballRequests, setFootballRequests] = useState([]);
+  const [scoreStations, setScoreStations] = useState([]);
+  const [footballMatches, setFootballMatches] = useState([]);
+  const [footballTeams, setFootballTeams] = useState([]);
   const [newEmail, setNewEmail] = useState('');
   const [newRoles, setNewRoles] = useState(DEFAULT_NORMAL_ROLES);
   const [busyKey, setBusyKey] = useState('');
@@ -58,19 +77,77 @@ export default function AdminPage({ currentUser }) {
 
   useEffect(() => subscribeAllowedUsers(event.id, setAllowedUsers), [event.id]);
   useEffect(() => subscribeAccessRequests(event.id, setRequests), [event.id]);
-  useEffect(() => subscribeAllowedResultUsers(event.id, setAllowedResultUsers), [event.id]);
-  useEffect(() => subscribePendingResultAccessRequests(event.id, setResultRequests), [event.id]);
-  useEffect(() => subscribeCurrentStationAssignment(event.id, 'start', (doc) => {
-    setStationAssignments((prev) => ({ ...prev, start: doc }));
-  }), [event.id]);
-  useEffect(() => subscribeCurrentStationAssignment(event.id, 'finish', (doc) => {
-    setStationAssignments((prev) => ({ ...prev, finish: doc }));
-  }), [event.id]);
+  useEffect(() => {
+    if (isFootball) {
+      setAllowedResultUsers([]);
+      return undefined;
+    }
+    return subscribeAllowedResultUsers(event.id, setAllowedResultUsers);
+  }, [event.id, isFootball]);
+  useEffect(() => {
+    if (isFootball) {
+      setResultRequests([]);
+      return undefined;
+    }
+    return subscribePendingResultAccessRequests(event.id, setResultRequests);
+  }, [event.id, isFootball]);
+  useEffect(() => {
+    if (isFootball) {
+      setStationAssignments({ start: null, finish: null });
+      return undefined;
+    }
+    return subscribeCurrentStationAssignment(event.id, 'start', (doc) => {
+      setStationAssignments((prev) => ({ ...prev, start: doc }));
+    });
+  }, [event.id, isFootball]);
+  useEffect(() => {
+    if (isFootball) {
+      return undefined;
+    }
+    return subscribeCurrentStationAssignment(event.id, 'finish', (doc) => {
+      setStationAssignments((prev) => ({ ...prev, finish: doc }));
+    });
+  }, [event.id, isFootball]);
+  useEffect(() => {
+    if (!isFootball) {
+      setAllowedFootballUsers([]);
+      return undefined;
+    }
+    return subscribeAllowedFootballUsers(event.id, setAllowedFootballUsers);
+  }, [event.id, isFootball]);
+  useEffect(() => {
+    if (!isFootball) {
+      setFootballRequests([]);
+      return undefined;
+    }
+    return subscribePendingFootballAccessRequests(event.id, setFootballRequests);
+  }, [event.id, isFootball]);
+  useEffect(() => {
+    if (!isFootball) {
+      setScoreStations([]);
+      setFootballMatches([]);
+      setFootballTeams([]);
+      return undefined;
+    }
+    return subscribeScoreStations(event.id, setScoreStations);
+  }, [event.id, isFootball]);
+  useEffect(() => {
+    if (!isFootball) return undefined;
+    return subscribeMatches(event.id, setFootballMatches);
+  }, [event.id, isFootball]);
+  useEffect(() => {
+    if (!isFootball) return undefined;
+    return subscribeParticipants(event.id, setFootballTeams);
+  }, [event.id, isFootball]);
 
   const currentEmail = currentUser?.email?.trim().toLowerCase() ?? '';
   const currentUserEntry = useMemo(
     () => allowedUsers.find((entry) => entry.id === currentEmail) ?? null,
     [allowedUsers, currentEmail],
+  );
+  const footballMatchesWithTeams = useMemo(
+    () => enrichMatches(footballMatches, footballTeams, []),
+    [footballMatches, footballTeams],
   );
 
   const clearMessages = () => {
@@ -196,6 +273,34 @@ export default function AdminPage({ currentUser }) {
     }
   };
 
+  const handleApproveFootballRequest = async (uid) => {
+    clearMessages();
+    setBusyKey(`football-approve:${uid}`);
+    try {
+      log.info('approving football access request', { uid });
+      await approveFootballAccessRequest(event.id, uid);
+      setFeedback(`Demande foot approuvée pour ${uid}.`);
+    } catch (err) {
+      setError(getErrorLabel(err));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const handleRejectFootballRequest = async (uid) => {
+    clearMessages();
+    setBusyKey(`football-reject:${uid}`);
+    try {
+      log.info('rejecting football access request', { uid });
+      await rejectFootballAccessRequest(event.id, uid);
+      setFeedback(`Demande foot refusée pour ${uid}.`);
+    } catch (err) {
+      setError(getErrorLabel(err));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
   const handleResultRoleToggle = async (uid, role, checked) => {
     clearMessages();
     const entry = allowedResultUsers.find((user) => user.id === uid);
@@ -225,6 +330,28 @@ export default function AdminPage({ currentUser }) {
     }
   };
 
+  const handleFootballRoleToggle = async (uid, role, checked) => {
+    clearMessages();
+    const entry = allowedFootballUsers.find((user) => user.id === uid);
+    if (!entry) return;
+
+    const nextRoles = normalizeFootballRoles({
+      ...entry,
+      [role]: checked,
+    });
+
+    setBusyKey(`football-role:${uid}:${role}`);
+    try {
+      log.info('toggling football role', { uid, role, checked });
+      await saveAllowedFootballUser(event.id, uid, { ...entry, ...nextRoles });
+      setFeedback(`Droits foot mis à jour pour ${entry.email || uid}.`);
+    } catch (err) {
+      setError(getErrorLabel(err));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
   const handleDeleteResultUser = async (uid) => {
     clearMessages();
     setBusyKey(`result-delete:${uid}`);
@@ -232,6 +359,20 @@ export default function AdminPage({ currentUser }) {
       log.info('deleting result operator', { uid });
       await deleteAllowedResultUser(event.id, uid);
       setFeedback(`Accès résultats supprimé pour ${uid}.`);
+    } catch (err) {
+      setError(getErrorLabel(err));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const handleDeleteFootballUser = async (uid) => {
+    clearMessages();
+    setBusyKey(`football-delete:${uid}`);
+    try {
+      log.info('deleting football operator', { uid });
+      await deleteAllowedFootballUser(event.id, uid);
+      setFeedback(`Accès foot supprimé pour ${uid}.`);
     } catch (err) {
       setError(getErrorLabel(err));
     } finally {
@@ -253,6 +394,20 @@ export default function AdminPage({ currentUser }) {
     }
   };
 
+  const handleReleaseScoreStation = async (matchId) => {
+    clearMessages();
+    setBusyKey(`release-score-station:${matchId}`);
+    try {
+      log.info('releasing football score station as admin', { matchId });
+      await releaseScoreStationAsAdmin(event.id, matchId);
+      setFeedback('Poste score libéré.');
+    } catch (err) {
+      setError(getErrorLabel(err));
+    } finally {
+      setBusyKey('');
+    }
+  };
+
 
   return (
     <div className="config-page">
@@ -261,8 +416,17 @@ export default function AdminPage({ currentUser }) {
         <p className="hint">
           Les accès Google de cet événement sont gérés dans <code>events/{event.id}/allowedUsers</code>.
           {' '}
-          Les opérateurs résultats et TV non-OAuth sont gérés par <code>uid</code> dans{' '}
-          <code>events/{event.id}/allowedResultUsers</code>.
+          {isFootball ? (
+            <>
+              Les opérateurs foot non-OAuth sont gérés par <code>uid</code> dans{' '}
+              <code>events/{event.id}/allowedFootballUsers</code>.
+            </>
+          ) : (
+            <>
+              Les opérateurs résultats et TV non-OAuth sont gérés par <code>uid</code> dans{' '}
+              <code>events/{event.id}/allowedResultUsers</code>.
+            </>
+          )}
         </p>
         {currentUserEntry && (
           <div className="admin-banner">
@@ -313,14 +477,14 @@ export default function AdminPage({ currentUser }) {
 
       <section className="config-section">
         <div className="admin-section-head">
-          <h2 className="section-title">Demandes Résultats</h2>
-          <span className="admin-counter">{resultRequests.length}</span>
+          <h2 className="section-title">{isFootball ? 'Demandes Foot' : 'Demandes Résultats'}</h2>
+          <span className="admin-counter">{isFootball ? footballRequests.length : resultRequests.length}</span>
         </div>
-        {resultRequests.length === 0 ? (
-          <div className="stream-empty">Aucune demande résultats en attente.</div>
+        {(isFootball ? footballRequests.length : resultRequests.length) === 0 ? (
+          <div className="stream-empty">{isFootball ? 'Aucune demande foot en attente.' : 'Aucune demande résultats en attente.'}</div>
         ) : (
           <div className="admin-card-list">
-            {resultRequests.map((request) => (
+            {(isFootball ? footballRequests : resultRequests).map((request) => (
               <article key={request.id} className="admin-card">
                 <div className="admin-card-main">
                   <div className="admin-email">{request.email || request.uid}</div>
@@ -333,17 +497,17 @@ export default function AdminPage({ currentUser }) {
                 <div className="admin-actions">
                   <button
                     className="btn btn-primary btn-sm"
-                    onClick={() => handleApproveResultRequest(request.uid)}
-                    disabled={busyKey !== '' && busyKey !== `result-approve:${request.uid}`}
+                    onClick={() => (isFootball ? handleApproveFootballRequest(request.uid) : handleApproveResultRequest(request.uid))}
+                    disabled={busyKey !== '' && busyKey !== `${isFootball ? 'football' : 'result'}-approve:${request.uid}`}
                   >
-                    {busyKey === `result-approve:${request.uid}` ? 'Validation…' : 'Approuver'}
+                    {busyKey === `${isFootball ? 'football' : 'result'}-approve:${request.uid}` ? 'Validation…' : 'Approuver'}
                   </button>
                   <button
                     className="btn btn-secondary btn-sm"
-                    onClick={() => handleRejectResultRequest(request.uid)}
-                    disabled={busyKey !== '' && busyKey !== `result-reject:${request.uid}`}
+                    onClick={() => (isFootball ? handleRejectFootballRequest(request.uid) : handleRejectResultRequest(request.uid))}
+                    disabled={busyKey !== '' && busyKey !== `${isFootball ? 'football' : 'result'}-reject:${request.uid}`}
                   >
-                    {busyKey === `result-reject:${request.uid}` ? 'Refus…' : 'Refuser'}
+                    {busyKey === `${isFootball ? 'football' : 'result'}-reject:${request.uid}` ? 'Refus…' : 'Refuser'}
                   </button>
                 </div>
               </article>
@@ -441,26 +605,35 @@ export default function AdminPage({ currentUser }) {
 
       <section className="config-section">
         <div className="admin-section-head">
-          <h2 className="section-title">Utilisateurs non-OAuth <span className="admin-section-note">(vert départ et rouge arrivée actuels)</span></h2>
-          <span className="admin-counter">{allowedResultUsers.length}</span>
+          <h2 className="section-title">
+            Utilisateurs non-OAuth
+            <span className="admin-section-note">
+              {isFootball ? ' (tv, score, commentaire)' : ' (vert départ et rouge arrivée actuels)'}
+            </span>
+          </h2>
+          <span className="admin-counter">{isFootball ? allowedFootballUsers.length : allowedResultUsers.length}</span>
           <div className="admin-actions">
-            <button
-              className="btn btn-secondary btn-sm"
-              disabled={!stationAssignments.start?.assignedUid || (busyKey !== '' && busyKey !== 'release-station:start')}
-              onClick={() => handleReleaseStation('start')}
-            >
-              {busyKey === 'release-station:start' ? 'Libération…' : 'Retirer le poste départ'}
-            </button>
-            <button
-              className="btn btn-secondary btn-sm"
-              disabled={!stationAssignments.finish?.assignedUid || (busyKey !== '' && busyKey !== 'release-station:finish')}
-              onClick={() => handleReleaseStation('finish')}
-            >
-              {busyKey === 'release-station:finish' ? 'Libération…' : 'Retirer le poste arrivée'}
-            </button>
+            {isFootball ? null : (
+              <>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  disabled={!stationAssignments.start?.assignedUid || (busyKey !== '' && busyKey !== 'release-station:start')}
+                  onClick={() => handleReleaseStation('start')}
+                >
+                  {busyKey === 'release-station:start' ? 'Libération…' : 'Retirer le poste départ'}
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  disabled={!stationAssignments.finish?.assignedUid || (busyKey !== '' && busyKey !== 'release-station:finish')}
+                  onClick={() => handleReleaseStation('finish')}
+                >
+                  {busyKey === 'release-station:finish' ? 'Libération…' : 'Retirer le poste arrivée'}
+                </button>
+              </>
+            )}
           </div>
         </div>
-        {allowedResultUsers.length === 0 ? (
+        {(isFootball ? allowedFootballUsers.length : allowedResultUsers.length) === 0 ? (
           <div className="stream-empty">Aucun utilisateur non-OAuth autorisé.</div>
         ) : (
           <div className="admin-table-wrap">
@@ -469,54 +642,67 @@ export default function AdminPage({ currentUser }) {
                 <tr>
                   <th>Email</th>
                   <th>UID</th>
-                  {LIGHT_ROLE_KEYS.map((role) => <th key={role}>{RESULT_ROLE_LABELS[role]}</th>)}
+                  {(isFootball ? FOOTBALL_LIGHT_ROLE_KEYS : LIGHT_ROLE_KEYS).map((role) => (
+                    <th key={role}>{isFootball ? FOOTBALL_LIGHT_ROLE_LABELS[role] : RESULT_ROLE_LABELS[role]}</th>
+                  ))}
                   <th>Mise à jour</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {allowedResultUsers.map((entry) => {
-                  const isStartOperator = stationAssignments.start?.assignedUid === entry.id;
-                  const isFinishOperator = stationAssignments.finish?.assignedUid === entry.id;
-                  const rowClassName = [
-                    isStartOperator ? 'admin-row-start' : '',
-                    isFinishOperator ? 'admin-row-finish' : '',
-                  ].filter(Boolean).join(' ');
+                {(isFootball ? allowedFootballUsers : allowedResultUsers).map((entry) => {
+                  const rowClassName = isFootball
+                    ? (scoreStations.some((station) => station.assignedUid === entry.id) ? 'admin-row-start' : '')
+                    : [
+                      stationAssignments.start?.assignedUid === entry.id ? 'admin-row-start' : '',
+                      stationAssignments.finish?.assignedUid === entry.id ? 'admin-row-finish' : '',
+                    ].filter(Boolean).join(' ');
 
                   return (
-                  <tr key={entry.id} className={rowClassName}>
-                    <td>
-                      <div className="admin-email">{entry.email || '—'}</div>
-                      {isStartOperator && <div className="admin-subline">Poste départ actif</div>}
-                      {isFinishOperator && <div className="admin-subline">Poste arrivée actif</div>}
-                    </td>
-                    <td className="admin-uid">{entry.uid || entry.id}</td>
-                    {LIGHT_ROLE_KEYS.map((role) => {
-                      const key = `result-role:${entry.id}:${role}`;
-                      return (
-                        <td key={role} className="admin-cell-center">
-                          <label className="admin-check">
-                            <input
-                              type="checkbox"
-                              checked={!!entry[role]}
-                              disabled={busyKey !== '' && busyKey !== key}
-                              onChange={(e) => handleResultRoleToggle(entry.id, role, e.target.checked)}
-                            />
-                          </label>
-                        </td>
-                      );
-                    })}
-                    <td className="admin-updated-at">{formatTimestamp(entry.updatedAt)}</td>
-                    <td className="admin-cell-actions">
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => handleDeleteResultUser(entry.id)}
-                        disabled={busyKey !== '' && busyKey !== `result-delete:${entry.id}`}
-                      >
-                        {busyKey === `result-delete:${entry.id}` ? 'Suppression…' : 'Retirer'}
-                      </button>
-                    </td>
-                  </tr>
+                    <tr key={entry.id} className={rowClassName}>
+                      <td>
+                        <div className="admin-email">{entry.email || '—'}</div>
+                        {isFootball && scoreStations.some((station) => station.assignedUid === entry.id) && (
+                          <div className="admin-subline">Poste score actif sur au moins une rencontre</div>
+                        )}
+                        {!isFootball && stationAssignments.start?.assignedUid === entry.id && (
+                          <div className="admin-subline">Poste départ actif</div>
+                        )}
+                        {!isFootball && stationAssignments.finish?.assignedUid === entry.id && (
+                          <div className="admin-subline">Poste arrivée actif</div>
+                        )}
+                      </td>
+                      <td className="admin-uid">{entry.uid || entry.id}</td>
+                      {(isFootball ? FOOTBALL_LIGHT_ROLE_KEYS : LIGHT_ROLE_KEYS).map((role) => {
+                        const key = `${isFootball ? 'football' : 'result'}-role:${entry.id}:${role}`;
+                        return (
+                          <td key={role} className="admin-cell-center">
+                            <label className="admin-check">
+                              <input
+                                type="checkbox"
+                                checked={!!entry[role]}
+                                disabled={busyKey !== '' && busyKey !== key}
+                                onChange={(e) => (
+                                  isFootball
+                                    ? handleFootballRoleToggle(entry.id, role, e.target.checked)
+                                    : handleResultRoleToggle(entry.id, role, e.target.checked)
+                                )}
+                              />
+                            </label>
+                          </td>
+                        );
+                      })}
+                      <td className="admin-updated-at">{formatTimestamp(entry.updatedAt)}</td>
+                      <td className="admin-cell-actions">
+                        <button
+                          className="btn btn-danger btn-sm"
+                          onClick={() => (isFootball ? handleDeleteFootballUser(entry.id) : handleDeleteResultUser(entry.id))}
+                          disabled={busyKey !== '' && busyKey !== `${isFootball ? 'football' : 'result'}-delete:${entry.id}`}
+                        >
+                          {busyKey === `${isFootball ? 'football' : 'result'}-delete:${entry.id}` ? 'Suppression…' : 'Retirer'}
+                        </button>
+                      </td>
+                    </tr>
                   );
                 })}
               </tbody>
@@ -524,6 +710,44 @@ export default function AdminPage({ currentUser }) {
           </div>
         )}
       </section>
+
+      {isFootball && (
+        <section className="config-section">
+          <div className="admin-section-head">
+            <h2 className="section-title">Postes score actifs</h2>
+            <span className="admin-counter">{scoreStations.length}</span>
+          </div>
+          {scoreStations.length === 0 ? (
+            <div className="stream-empty">Aucun poste score actif.</div>
+          ) : (
+            <div className="admin-card-list">
+              {scoreStations.map((station) => {
+                const match = footballMatchesWithTeams.find((entry) => entry.id === station.id);
+                return (
+                  <article key={station.id} className="admin-card">
+                    <div className="admin-card-main">
+                      <div className="admin-email">
+                        {match ? `${match.homeLabel} vs ${match.awayLabel}` : `Rencontre ${station.id}`}
+                      </div>
+                      <div className="admin-subline">{station.email || station.assignedUid}</div>
+                      {station.claimedAt && <div className="admin-subline">Pris {formatTimestamp(station.claimedAt)}</div>}
+                    </div>
+                    <div className="admin-actions">
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleReleaseScoreStation(station.id)}
+                        disabled={busyKey !== '' && busyKey !== `release-score-station:${station.id}`}
+                      >
+                        {busyKey === `release-score-station:${station.id}` ? 'Libération…' : 'Retirer le poste score'}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
     </div>
   );

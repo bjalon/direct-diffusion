@@ -22,6 +22,10 @@ export default function HomePage({
   globalRoles,
   onGoogleSignIn,
   onLogout,
+  filterType = null,
+  title = 'Événements',
+  subtitle = 'Choisis un événement pour accéder à son affichage TV, son chrono et son administration.',
+  kicker = 'Direct Diffusion',
 }) {
   const [promotedEvents, setPromotedEvents] = useState([]);
 
@@ -29,17 +33,19 @@ export default function HomePage({
 
   useEffect(() => subscribeEvents(setPromotedEvents, { promotedOnly: true }), []);
 
-  const groupedEvents = useMemo(() => [...groupEventsByType(promotedEvents).entries()], [promotedEvents]);
+  const visibleEvents = useMemo(
+    () => (filterType ? promotedEvents.filter((event) => event.type === filterType) : promotedEvents),
+    [filterType, promotedEvents],
+  );
+  const groupedEvents = useMemo(() => [...groupEventsByType(visibleEvents).entries()], [visibleEvents]);
 
   return (
     <div className="home-page">
       <section className="home-hero">
         <div>
-          <div className="home-kicker">Direct Diffusion</div>
-          <h1 className="home-title">Événements</h1>
-          <p className="home-subtitle">
-            Choisis un événement pour accéder à son affichage TV, son chrono et son administration.
-          </p>
+          <div className="home-kicker">{kicker}</div>
+          <h1 className="home-title">{title}</h1>
+          <p className="home-subtitle">{subtitle}</p>
         </div>
 
         <div className="home-auth">
@@ -79,7 +85,7 @@ export default function HomePage({
                 <Link
                   key={event.id}
                   className="home-event-card"
-                  to={buildEventRoute(event.slug || event.id, 'display')}
+                  to={buildEventRoute(event.slug || event.id, 'display', event.type)}
                 >
                   <div className="home-event-card-head">
                     <img className="home-event-icon" src={getEventIconSrc(event)} alt="" />

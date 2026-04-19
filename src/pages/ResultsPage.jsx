@@ -641,7 +641,7 @@ export default function ResultsPage({ user, onLogout }) {
           onLogout={handleResultsLogout}
           actions={(
             <>
-              <button className="btn btn-primary login-btn" onClick={() => navigate(buildEventRoute(event.slug, 'display'))}>
+              <button className="btn btn-primary login-btn" onClick={() => navigate(buildEventRoute(event.slug, 'display', event.type))}>
                 Aller sur Affichage
               </button>
               <button className="btn btn-secondary login-btn" onClick={handleResultsLogout}>

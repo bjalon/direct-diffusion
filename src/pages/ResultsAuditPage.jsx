@@ -39,7 +39,7 @@ export default function ResultsAuditPage() {
         <div className="admin-section-head">
           <h2 className="section-title">Journal Résultats</h2>
           <div className="admin-actions">
-            <Link className="btn btn-secondary btn-sm" to={buildEventRoute(currentEvent.slug, 'runs')}>
+            <Link className="btn btn-secondary btn-sm" to={buildEventRoute(currentEvent.slug, 'runs', currentEvent.type)}>
               Corriger un run
             </Link>
           </div>

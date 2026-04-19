@@ -3,17 +3,22 @@ import { useEventContext } from '../context/EventContext';
 import {
   subscribeParticipants, addParticipant, updateParticipant, deleteParticipant, reorderParticipants,
 } from '../firebase/participants';
+import { normalizeTeamTrigram } from '../utils/football';
 
 export default function ParticipantsPage({ canEdit = false }) {
   const { event } = useEventContext();
   const [participants, setParticipants] = useState([]);
   const [newLabel, setNewLabel] = useState('');
+  const [newTrigram, setNewTrigram] = useState('');
   const [adding, setAdding] = useState(false);
   const [draggedParticipantId, setDraggedParticipantId] = useState('');
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const participantsRef = useRef([]);
   const dragOriginRef = useRef([]);
   const dragDidDropRef = useRef(false);
+  const isFootball = event.type === 'football';
+  const itemLabel = isFootball ? 'équipe' : 'participant';
+  const sectionTitle = isFootball ? 'Équipes' : 'Participants';
 
   useEffect(() => subscribeParticipants(event.id, setParticipants), [event.id]);
   useEffect(() => {
@@ -25,8 +30,14 @@ export default function ParticipantsPage({ canEdit = false }) {
     const label = newLabel.trim();
     if (!label) return;
     const maxOrder = participants.reduce((m, p) => Math.max(m, p.order ?? 0), 0);
-    await addParticipant(event.id, label, maxOrder + 1);
+    await addParticipant(event.id, {
+      label,
+      order: maxOrder + 1,
+      active: true,
+      trigram: isFootball ? normalizeTeamTrigram(newTrigram || label) : '',
+    });
     setNewLabel('');
+    setNewTrigram('');
     setAdding(false);
   };
 
@@ -92,20 +103,21 @@ export default function ParticipantsPage({ canEdit = false }) {
   return (
     <div className="config-page">
       <section className="config-section">
-        <h2 className="section-title">Participants</h2>
+        <h2 className="section-title">{sectionTitle}</h2>
         {canEdit && (
           <p className="hint" style={{ paddingTop: 0 }}>
-            Glissez le bouton à gauche d’un participant pour réorganiser l’ordre de passage.
+            Glissez le bouton à gauche d’un {itemLabel} pour réorganiser l’ordre d’affichage.
           </p>
         )}
 
         <div className="participant-list" onDragOver={(event) => canEdit && event.preventDefault()}>
           {participants.length === 0 && !adding && (
-            <div className="stream-empty">Aucun participant{canEdit ? '. Ajoutez-en un ci-dessous.' : '.'}</div>
+            <div className="stream-empty">Aucun {itemLabel}{canEdit ? '. Ajoutez-en un ci-dessous.' : '.'}</div>
           )}
           {participants.map((p) => (
             <ParticipantRow
               key={p.id}
+              eventType={event.type}
               eventId={event.id}
               participant={p}
               canEdit={canEdit}
@@ -121,23 +133,35 @@ export default function ParticipantsPage({ canEdit = false }) {
 
         {canEdit && (adding ? (
           <div className="add-stream-form">
-            <label className="form-label">Nom du participant</label>
+            <label className="form-label">Nom de {isFootball ? "l'équipe" : 'du participant'}</label>
             <input
               className="form-input"
-              placeholder="Ex : Jean Dupont"
+              placeholder={isFootball ? 'Ex : FC Qastia' : 'Ex : Jean Dupont'}
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleAdd();
-                if (e.key === 'Escape') { setAdding(false); setNewLabel(''); }
+                if (e.key === 'Escape') { setAdding(false); setNewLabel(''); setNewTrigram(''); }
               }}
               autoFocus
             />
+            {isFootball && (
+              <>
+                <label className="form-label">Trigramme</label>
+                <input
+                  className="form-input"
+                  placeholder="QAS"
+                  value={newTrigram}
+                  maxLength={4}
+                  onChange={(e) => setNewTrigram(normalizeTeamTrigram(e.target.value))}
+                />
+              </>
+            )}
             <div className="form-actions">
               <button className="btn btn-primary" onClick={handleAdd}>Ajouter</button>
               <button
                 className="btn btn-secondary"
-                onClick={() => { setAdding(false); setNewLabel(''); }}
+                onClick={() => { setAdding(false); setNewLabel(''); setNewTrigram(''); }}
               >
                 Annuler
               </button>
@@ -145,7 +169,7 @@ export default function ParticipantsPage({ canEdit = false }) {
           </div>
         ) : (
           <button className="btn btn-primary" onClick={() => setAdding(true)}>
-            + Ajouter un participant
+            + Ajouter {isFootball ? 'une équipe' : 'un participant'}
           </button>
         ))}
       </section>
@@ -172,6 +196,7 @@ function moveParticipant(participants, draggedParticipantId, targetParticipantId
 }
 
 function ParticipantRow({
+  eventType,
   eventId,
   participant,
   canEdit,
@@ -185,18 +210,29 @@ function ParticipantRow({
   const [label, setLabel] = useState(participant.label);
   const [order, setOrder] = useState(participant.order ?? 0);
   const [active, setActive] = useState(participant.active !== false);
+  const [trigram, setTrigram] = useState(participant.trigram ?? '');
+  const isFootball = eventType === 'football';
 
   useEffect(() => setLabel(participant.label), [participant.label]);
   useEffect(() => setOrder(participant.order ?? 0), [participant.order]);
   useEffect(() => setActive(participant.active !== false), [participant.active]);
+  useEffect(() => setTrigram(participant.trigram ?? ''), [participant.trigram]);
 
   const saveLabel = () => {
     if (!canEdit) return;
     const trimmed = label.trim();
-    if (trimmed && trimmed !== participant.label) {
-      updateParticipant(eventId, participant.id, { label: trimmed });
+    const normalizedTrigram = normalizeTeamTrigram(trigram || trimmed);
+    const labelChanged = trimmed && trimmed !== participant.label;
+    const trigramChanged = isFootball && normalizedTrigram !== (participant.trigram ?? '');
+
+    if (labelChanged || trigramChanged) {
+      updateParticipant(eventId, participant.id, {
+        ...(labelChanged ? { label: trimmed } : {}),
+        ...(isFootball ? { trigram: normalizedTrigram } : {}),
+      });
     } else {
       setLabel(participant.label);
+      setTrigram(participant.trigram ?? '');
     }
   };
 
@@ -259,6 +295,17 @@ function ParticipantRow({
         onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
         readOnly={!canEdit || disableActions}
       />
+      {isFootball && (
+        <input
+          className="participant-order-input participant-trigram-input"
+          value={trigram}
+          onChange={(e) => canEdit && !disableActions && setTrigram(normalizeTeamTrigram(e.target.value))}
+          onBlur={saveLabel}
+          maxLength={4}
+          title="Trigramme"
+          readOnly={!canEdit || disableActions}
+        />
+      )}
       {canEdit && (
         <button
           className={`btn btn-sm ${active ? 'btn-secondary' : 'btn-primary'}`}

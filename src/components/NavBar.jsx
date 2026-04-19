@@ -3,16 +3,27 @@ import { Link, useLocation } from 'react-router-dom';
 import { useEventContext } from '../context/EventContext';
 import { buildEventRoute, HOME_ROUTE } from '../utils/routes';
 
-const ALL_LINKS = [
-  { routeKey: 'display', label: 'Affichage', role: null },
+const SOAPBOX_LINKS = [
+  { routeKey: 'display', label: 'Affichage', role: 'viewer' },
   { routeKey: 'results', label: 'Résultats', role: 'results_view' },
-  { routeKey: 'flow', label: 'Flow', role: null },
+  { routeKey: 'flow', label: 'Flow', role: 'viewer' },
   { routeKey: 'flowAdmin', label: 'Flow admin', role: 'streams_admin' },
-  { routeKey: 'layouts', label: 'Layouts', role: null },
+  { routeKey: 'layouts', label: 'Layouts', role: 'viewer' },
   { routeKey: 'participants', label: 'Participants', role: 'participants' },
   { routeKey: 'runs', label: 'Runs', role: 'administration' },
   { routeKey: 'admin', label: 'Admin', role: 'administration' },
   { routeKey: 'archives', label: 'Archives', role: 'administration' },
+];
+
+const FOOTBALL_LINKS = [
+  { routeKey: 'display', label: 'Affichage', role: 'viewer' },
+  { routeKey: 'flow', label: 'Flow', role: 'viewer' },
+  { routeKey: 'flowAdmin', label: 'Flow admin', role: 'streams_admin' },
+  { routeKey: 'layouts', label: 'Layouts', role: 'viewer' },
+  { routeKey: 'participants', label: 'Équipes', role: 'participants' },
+  { routeKey: 'runs', label: 'Rencontres', role: 'administration' },
+  { routeKey: 'scoreboard', label: 'Score', role: 'scoreboard' },
+  { routeKey: 'admin', label: 'Admin', role: 'administration' },
 ];
 
 export default function NavBar({ user, onLogout, roles, identityLabel, config, onSelectConfiguration }) {
@@ -26,11 +37,12 @@ export default function NavBar({ user, onLogout, roles, identityLabel, config, o
     setConfigurationMenuOpen(false);
   };
 
-  const links = ALL_LINKS
+  const linkDefinitions = event.type === 'football' ? FOOTBALL_LINKS : SOAPBOX_LINKS;
+  const links = linkDefinitions
     .filter(({ role }) => !role || roles?.[role])
     .map(({ routeKey, ...link }) => ({
       ...link,
-      to: buildEventRoute(event.slug, routeKey),
+      to: buildEventRoute(event.slug, routeKey, event.type),
     }));
   const configurationEntries = Object.entries(config?.configurations ?? {});
   const activeConfiguration = configurationEntries.find(([id]) => id === config?.activeConfigurationId)?.[1]

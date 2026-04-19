@@ -12,15 +12,26 @@ import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from
 import { auth } from './firebase';
 import { requestAccess } from './firebase/admin';
 import { getGlobalRoles, subscribeEvent } from './firebase/events';
+import {
+  releaseOwnedScoreStations,
+  subscribeFootballAccess,
+  subscribeFootballAccessRequest,
+  subscribeFootballEvents,
+  subscribeMatches,
+} from './firebase/football';
+import { subscribeParticipants } from './firebase/participants';
 import { getUserRoles, saveStreams, seedStreamsIfEmpty, subscribeStreams } from './firebase/streams';
 import NavBar from './components/NavBar';
 import { EventProvider } from './context/EventContext';
 import { buildSrcFromUrl, normalizeFacebookEmbedSrc } from './utils/iframeParser';
+import { footballOverlayByStream } from './utils/football';
 import { createLogger } from './utils/logger';
 import { rememberAnonymousAccount } from './utils/anonymousAccounts';
 import { loadConfig, normalizeConfigState, saveConfig } from './utils/storage';
 import { EVENTS_ADMIN_ROUTE, buildEventRoute, HOME_ROUTE, LEGACY_ROUTE_REDIRECTS } from './utils/routes';
 import AdminPage from './pages/AdminPage';
+import FootballMatchesPage from './pages/FootballMatchesPage';
+import FootballScorePage from './pages/FootballScorePage';
 import ConfigPage from './pages/ConfigPage';
 import DisplayPage from './pages/DisplayPage';
 import HomePage from './pages/HomePage';
@@ -135,6 +146,21 @@ export default function App() {
           )}
         />
         <Route
+          path="/foot"
+          element={(
+            <HomePage
+              user={user}
+              globalRoles={globalRoles}
+              onGoogleSignIn={async () => signInWithPopup(auth, googleProvider)}
+              onLogout={() => signOut(auth)}
+              filterType="football"
+              title="Football"
+              subtitle="Choisis un événement football pour accéder à son affichage, ses flux et sa gestion de score."
+              kicker="Direct Diffusion Sport"
+            />
+          )}
+        />
+        <Route
           path={EVENTS_ADMIN_ROUTE}
           element={(
             <GlobalEventsAdminRoute
@@ -147,6 +173,10 @@ export default function App() {
         />
         <Route
           path="/events/:eventSlug/*"
+          element={<EventShell user={user} globalRoles={globalRoles} />}
+        />
+        <Route
+          path="/foot/:eventSlug/*"
           element={<EventShell user={user} globalRoles={globalRoles} />}
         />
         <Route path="*" element={<Navigate to={HOME_ROUTE} replace />} />
@@ -280,7 +310,11 @@ function EventShell({ user, globalRoles }) {
   const [accessRequestState, setAccessRequestState] = useState('idle');
   const [deviceAccess, setDeviceAccess] = useState(null);
   const [deviceRequest, setDeviceRequest] = useState(null);
+  const [teams, setTeams] = useState([]);
+  const [matches, setMatches] = useState([]);
+  const [footballEvents, setFootballEvents] = useState([]);
   const isGlobalEventAdministrator = !!(globalRoles?.admin_events && hasGoogleProvider(user));
+  const isFootballEvent = event?.type === 'football';
 
   useEffect(() => {
     setLayoutSlots(loadConfig(eventSlug));
@@ -315,35 +349,48 @@ function EventShell({ user, globalRoles }) {
       setDeviceAccess(null);
       return undefined;
     }
-    return subscribeResultAccess(event.id, user.uid, setDeviceAccess);
-  }, [event?.id, user?.uid]);
+    return isFootballEvent
+      ? subscribeFootballAccess(event.id, user.uid, setDeviceAccess)
+      : subscribeResultAccess(event.id, user.uid, setDeviceAccess);
+  }, [event?.id, isFootballEvent, user?.uid]);
 
   useEffect(() => {
     if (!event?.id || !user || user === false) {
       setDeviceRequest(null);
       return undefined;
     }
-    return subscribeResultAccessRequest(event.id, user.uid, setDeviceRequest);
-  }, [event?.id, user?.uid]);
+    return isFootballEvent
+      ? subscribeFootballAccessRequest(event.id, user.uid, setDeviceRequest)
+      : subscribeResultAccessRequest(event.id, user.uid, setDeviceRequest);
+  }, [event?.id, isFootballEvent, user?.uid]);
 
   useEffect(() => {
     if (!event?.id || !user?.isAnonymous) return;
     rememberAnonymousAccount(auth, user, event.id, {
       email: deviceAccess?.email || deviceRequest?.email || user.email || '',
-      roles: {
-        tv: !!deviceAccess?.tv,
-        results_start: !!deviceAccess?.results_start,
-        results_finish: !!deviceAccess?.results_finish,
-      },
+      roles: isFootballEvent
+        ? {
+          tv: !!deviceAccess?.tv,
+          score: !!deviceAccess?.score,
+          commentator: !!deviceAccess?.commentator,
+        }
+        : {
+          tv: !!deviceAccess?.tv,
+          results_start: !!deviceAccess?.results_start,
+          results_finish: !!deviceAccess?.results_finish,
+        },
       requestStatus: deviceRequest?.status || '',
     });
   }, [
     event?.id,
+    isFootballEvent,
     user?.uid,
     user?.isAnonymous,
     user?.email,
     deviceAccess?.email,
     deviceAccess?.tv,
+    deviceAccess?.score,
+    deviceAccess?.commentator,
     deviceAccess?.results_start,
     deviceAccess?.results_finish,
     deviceRequest?.email,
@@ -375,6 +422,48 @@ function EventShell({ user, globalRoles }) {
     return unsub;
   }, [event?.id, user?.isAnonymous, deviceAccess?.tv, isGlobalEventAdministrator, roles]);
 
+  useEffect(() => {
+    const canReadFootballData = !!event?.id && isFootballEvent && (
+      isGlobalEventAdministrator
+      || !!(roles && roles !== false)
+      || !!(user?.isAnonymous && (deviceAccess?.tv || deviceAccess?.score || deviceAccess?.commentator))
+    );
+
+    if (!canReadFootballData) {
+      setTeams([]);
+      return undefined;
+    }
+    return subscribeParticipants(event.id, setTeams);
+  }, [deviceAccess?.commentator, deviceAccess?.score, deviceAccess?.tv, event?.id, isFootballEvent, isGlobalEventAdministrator, roles, user?.isAnonymous]);
+
+  useEffect(() => {
+    const canReadFootballData = !!event?.id && isFootballEvent && (
+      isGlobalEventAdministrator
+      || !!(roles && roles !== false)
+      || !!(user?.isAnonymous && (deviceAccess?.tv || deviceAccess?.score || deviceAccess?.commentator))
+    );
+
+    if (!canReadFootballData) {
+      setMatches([]);
+      return undefined;
+    }
+    return subscribeMatches(event.id, setMatches);
+  }, [deviceAccess?.commentator, deviceAccess?.score, deviceAccess?.tv, event?.id, isFootballEvent, isGlobalEventAdministrator, roles, user?.isAnonymous]);
+
+  useEffect(() => {
+    const canReadFootballData = !!event?.id && isFootballEvent && (
+      isGlobalEventAdministrator
+      || !!(roles && roles !== false)
+      || !!(user?.isAnonymous && (deviceAccess?.tv || deviceAccess?.score || deviceAccess?.commentator))
+    );
+
+    if (!canReadFootballData) {
+      setFootballEvents([]);
+      return undefined;
+    }
+    return subscribeFootballEvents(event.id, setFootballEvents);
+  }, [deviceAccess?.commentator, deviceAccess?.score, deviceAccess?.tv, event?.id, isFootballEvent, isGlobalEventAdministrator, roles, user?.isAnonymous]);
+
   const permissions = useMemo(() => {
     if (isGlobalEventAdministrator) {
       return {
@@ -382,8 +471,10 @@ function EventShell({ user, globalRoles }) {
         admin_flux: true,
         streams_admin: true,
         participants: true,
+        viewer: true,
         tv: false,
         results_view: true,
+        scoreboard: true,
         identityLabel: user?.email || '',
       };
     }
@@ -395,9 +486,25 @@ function EventShell({ user, globalRoles }) {
         admin_flux: !!roles.admin_flux && hasGoogleProvider(user),
         streams_admin: (!!roles.admin_flux || !!roles.administration) && hasGoogleProvider(user),
         participants: !!roles.participants && hasGoogleProvider(user),
+        viewer: true,
         tv: false,
         results_view: isAdministration,
+        scoreboard: isFootballEvent ? isAdministration : false,
         identityLabel: user?.email || '',
+      };
+    }
+
+    if (user?.isAnonymous && isFootballEvent && (deviceAccess?.tv || deviceAccess?.score || deviceAccess?.commentator)) {
+      return {
+        administration: false,
+        admin_flux: false,
+        streams_admin: false,
+        participants: false,
+        viewer: !!deviceAccess?.tv,
+        tv: !!deviceAccess?.tv,
+        results_view: false,
+        scoreboard: !!deviceAccess?.score || !!deviceAccess?.commentator,
+        identityLabel: deviceAccess.email || user.uid,
       };
     }
 
@@ -407,14 +514,25 @@ function EventShell({ user, globalRoles }) {
         admin_flux: false,
         streams_admin: false,
         participants: false,
+        viewer: true,
         tv: true,
         results_view: true,
+        scoreboard: false,
         identityLabel: deviceAccess.email || user.uid,
       };
     }
 
     return null;
-  }, [deviceAccess?.email, deviceAccess?.tv, isGlobalEventAdministrator, roles, user]);
+  }, [
+    deviceAccess?.commentator,
+    deviceAccess?.email,
+    deviceAccess?.score,
+    deviceAccess?.tv,
+    isFootballEvent,
+    isGlobalEventAdministrator,
+    roles,
+    user,
+  ]);
 
   const updateConfig = (updater) => {
     const prevFull = { ...layoutSlots, streams };
@@ -434,13 +552,31 @@ function EventShell({ user, globalRoles }) {
     if (user?.isAnonymous && event?.id) {
       rememberAnonymousAccount(auth, user, event.id, {
         email: deviceAccess?.email || deviceRequest?.email || user.email || '',
-        roles: {
-          tv: !!deviceAccess?.tv,
-          results_start: !!deviceAccess?.results_start,
-          results_finish: !!deviceAccess?.results_finish,
-        },
+        roles: isFootballEvent
+          ? {
+            tv: !!deviceAccess?.tv,
+            score: !!deviceAccess?.score,
+            commentator: !!deviceAccess?.commentator,
+          }
+          : {
+            tv: !!deviceAccess?.tv,
+            results_start: !!deviceAccess?.results_start,
+            results_finish: !!deviceAccess?.results_finish,
+          },
         requestStatus: deviceRequest?.status || '',
       });
+
+      if (isFootballEvent && deviceAccess?.score) {
+        try {
+          await releaseOwnedScoreStations(event.id, user.uid);
+        } catch (error) {
+          log.warn('football score station release failed during logout', {
+            eventId: event.id,
+            uid: user.uid,
+            error,
+          });
+        }
+      }
     }
     await signOut(auth);
   };
@@ -467,13 +603,28 @@ function EventShell({ user, globalRoles }) {
     );
   }
 
-  const hasLightResultsAccess = !!(user?.isAnonymous && (deviceAccess?.results_start || deviceAccess?.results_finish));
-  const chronoPath = buildEventRoute(event.slug, 'chrono');
-  const displayPath = buildEventRoute(event.slug, 'display');
-  const showNavbar = pathname !== chronoPath && !!user && user !== false && !!permissions;
+  const hasLightResultsAccess = !!(!isFootballEvent && user?.isAnonymous && (deviceAccess?.results_start || deviceAccess?.results_finish));
+  const chronoPath = isFootballEvent ? '' : buildEventRoute(event.slug, 'chrono', event.type);
+  const displayPath = buildEventRoute(event.slug, 'display', event.type);
+  const scoreboardPath = isFootballEvent ? buildEventRoute(event.slug, 'scoreboard', event.type) : '';
+  const onSoapboxPath = pathname.startsWith(`/events/${eventSlug}`);
+  const onFootballPath = pathname.startsWith(`/foot/${eventSlug}`);
+  const showNavbar = (!chronoPath || pathname !== chronoPath) && !!user && user !== false && !!permissions;
+
+  if (isFootballEvent && onSoapboxPath) {
+    return <Navigate to={displayPath} replace />;
+  }
+
+  if (!isFootballEvent && onFootballPath) {
+    return <Navigate to={displayPath} replace />;
+  }
 
   if (hasLightResultsAccess && pathname !== chronoPath) {
     return <Navigate to={chronoPath} replace />;
+  }
+
+  if (isFootballEvent && user?.isAnonymous && permissions?.scoreboard && !permissions?.tv && pathname !== scoreboardPath) {
+    return <Navigate to={scoreboardPath} replace />;
   }
 
   const eventConfig = {
@@ -489,6 +640,7 @@ function EventShell({ user, globalRoles }) {
       ...streams.filter((stream) => !stream.type),
     ],
   };
+  const scoreOverlayMap = isFootballEvent ? footballOverlayByStream(matches, teams, footballEvents) : {};
 
   return (
     <EventProvider value={{ event }}>
@@ -508,166 +660,324 @@ function EventShell({ user, globalRoles }) {
         )}
         <main className="app-main">
           <Routes>
-            <Route
-              path="tv/affichage"
-              element={(
-                <RegularEventRoute
-                  event={event}
-                  user={user}
-                  permissions={permissions}
-                  accessRequestState={accessRequestState}
-                  setAccessRequestState={setAccessRequestState}
-                  onLogout={handleLogout}
-                  deviceAccess={deviceAccess}
-                  deviceRequest={deviceRequest}
-                >
-                  <DisplayPage config={eventConfig} />
-                </RegularEventRoute>
-              )}
-            />
-            <Route
-              path="tv/flow"
-              element={(
-                <RegularEventRoute
-                  event={event}
-                  user={user}
-                  permissions={permissions}
-                  accessRequestState={accessRequestState}
-                  setAccessRequestState={setAccessRequestState}
-                  onLogout={handleLogout}
-                  deviceAccess={deviceAccess}
-                  deviceRequest={deviceRequest}
-                >
-                  <ConfigPage config={eventConfig} onUpdate={updateConfig} />
-                </RegularEventRoute>
-              )}
-            />
-            <Route
-              path="tv/flow-admin"
-              element={(
-                <RegularEventRoute
-                  event={event}
-                  user={user}
-                  permissions={permissions}
-                  requiredRole="streams_admin"
-                  accessRequestState={accessRequestState}
-                  setAccessRequestState={setAccessRequestState}
-                  onLogout={handleLogout}
-                  deviceAccess={deviceAccess}
-                  deviceRequest={deviceRequest}
-                >
-                  <AdminStreamsPage />
-                </RegularEventRoute>
-              )}
-            />
-            <Route
-              path="tv/participants"
-              element={(
-                <RegularEventRoute
-                  event={event}
-                  user={user}
-                  permissions={permissions}
-                  requiredRole="participants"
-                  accessRequestState={accessRequestState}
-                  setAccessRequestState={setAccessRequestState}
-                  onLogout={handleLogout}
-                  deviceAccess={deviceAccess}
-                  deviceRequest={deviceRequest}
-                >
-                  <ParticipantsPage canEdit={!!permissions?.participants} />
-                </RegularEventRoute>
-              )}
-            />
-            <Route
-              path="tv/layouts"
-              element={(
-                <RegularEventRoute
-                  event={event}
-                  user={user}
-                  permissions={permissions}
-                  accessRequestState={accessRequestState}
-                  setAccessRequestState={setAccessRequestState}
-                  onLogout={handleLogout}
-                  deviceAccess={deviceAccess}
-                  deviceRequest={deviceRequest}
-                >
-                  <LayoutsPage currentLayoutId={eventConfig.layout} />
-                </RegularEventRoute>
-              )}
-            />
-            <Route
-              path="tv/admin"
-              element={(
-                <RegularEventRoute
-                  event={event}
-                  user={user}
-                  permissions={permissions}
-                  requiredRole="administration"
-                  accessRequestState={accessRequestState}
-                  setAccessRequestState={setAccessRequestState}
-                  onLogout={handleLogout}
-                  deviceAccess={deviceAccess}
-                  deviceRequest={deviceRequest}
-                >
-                  <AdminPage currentUser={user} />
-                </RegularEventRoute>
-              )}
-            />
-            <Route
-              path="tv/resultats"
-              element={(
-                <RegularEventRoute
-                  event={event}
-                  user={user}
-                  permissions={permissions}
-                  requiredRole="results_view"
-                  accessRequestState={accessRequestState}
-                  setAccessRequestState={setAccessRequestState}
-                  onLogout={handleLogout}
-                  deviceAccess={deviceAccess}
-                  deviceRequest={deviceRequest}
-                >
-                  <ResultsViewerPage />
-                </RegularEventRoute>
-              )}
-            />
-            <Route
-              path="tv/runs"
-              element={(
-                <RegularEventRoute
-                  event={event}
-                  user={user}
-                  permissions={permissions}
-                  requiredRole="administration"
-                  accessRequestState={accessRequestState}
-                  setAccessRequestState={setAccessRequestState}
-                  onLogout={handleLogout}
-                  deviceAccess={deviceAccess}
-                  deviceRequest={deviceRequest}
-                >
-                  <ResultsRunsPage currentUser={user} />
-                </RegularEventRoute>
-              )}
-            />
-            <Route
-              path="tv/archives"
-              element={(
-                <RegularEventRoute
-                  event={event}
-                  user={user}
-                  permissions={permissions}
-                  requiredRole="administration"
-                  accessRequestState={accessRequestState}
-                  setAccessRequestState={setAccessRequestState}
-                  onLogout={handleLogout}
-                  deviceAccess={deviceAccess}
-                  deviceRequest={deviceRequest}
-                >
-                  <ResultsArchivePage />
-                </RegularEventRoute>
-              )}
-            />
-            <Route path="chrono" element={<ResultsPage user={user} onLogout={handleLogout} />} />
+            {isFootballEvent ? (
+              <>
+                <Route
+                  path="affichage"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="viewer"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <DisplayPage config={eventConfig} scoreOverlayByStream={scoreOverlayMap} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="flow"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="viewer"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <ConfigPage config={eventConfig} onUpdate={updateConfig} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="flow-admin"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="streams_admin"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <AdminStreamsPage />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="equipes"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="participants"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <ParticipantsPage canEdit={!!permissions?.participants} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="layouts"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="viewer"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <LayoutsPage currentLayoutId={eventConfig.layout} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="admin"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="administration"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <AdminPage currentUser={user} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="rencontres"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="administration"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <FootballMatchesPage canEdit={!!permissions?.administration} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="score"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="scoreboard"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <FootballScorePage
+                        currentUser={user}
+                        access={deviceAccess}
+                        canAdminister={!!permissions?.administration}
+                      />
+                    </RegularEventRoute>
+                  )}
+                />
+              </>
+            ) : (
+              <>
+                <Route
+                  path="tv/affichage"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="viewer"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <DisplayPage config={eventConfig} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="tv/flow"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="viewer"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <ConfigPage config={eventConfig} onUpdate={updateConfig} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="tv/flow-admin"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="streams_admin"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <AdminStreamsPage />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="tv/participants"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="participants"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <ParticipantsPage canEdit={!!permissions?.participants} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="tv/layouts"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="viewer"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <LayoutsPage currentLayoutId={eventConfig.layout} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="tv/admin"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="administration"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <AdminPage currentUser={user} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="tv/resultats"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="results_view"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <ResultsViewerPage />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="tv/runs"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="administration"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <ResultsRunsPage currentUser={user} />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route
+                  path="tv/archives"
+                  element={(
+                    <RegularEventRoute
+                      event={event}
+                      user={user}
+                      permissions={permissions}
+                      requiredRole="administration"
+                      accessRequestState={accessRequestState}
+                      setAccessRequestState={setAccessRequestState}
+                      onLogout={handleLogout}
+                      deviceAccess={deviceAccess}
+                      deviceRequest={deviceRequest}
+                    >
+                      <ResultsArchivePage />
+                    </RegularEventRoute>
+                  )}
+                />
+                <Route path="chrono" element={<ResultsPage user={user} onLogout={handleLogout} />} />
+              </>
+            )}
             <Route path="*" element={<Navigate to={displayPath} replace />} />
           </Routes>
         </main>
@@ -692,7 +1002,7 @@ function RegularEventRoute({
     return <LoginPage user={user} deviceAccess={deviceAccess} deviceRequest={deviceRequest} />;
   }
 
-  if (user?.isAnonymous && !permissions?.tv) {
+  if (user?.isAnonymous && !permissions?.tv && !permissions?.scoreboard) {
     return <LoginPage user={user} deviceAccess={deviceAccess} deviceRequest={deviceRequest} />;
   }
 
@@ -717,7 +1027,7 @@ function RegularEventRoute({
   }
 
   if (requiredRole && !permissions[requiredRole]) {
-    return <Navigate to={buildEventRoute(event.slug, 'display')} replace />;
+    return <Navigate to={buildEventRoute(event.slug, 'display', event.type)} replace />;
   }
 
   return children;
